@@ -1,0 +1,21 @@
+{
+  "$comment": "Add these keys to Lean/Launcher/config.json and set 'environment' to 'live-finam'.",
+
+  "finam-secret-token": "<PUT-YOUR-FINAM-API-SECRET-HERE>",
+  "finam-account-id":   "<PUT-YOUR-FINAM-ACCOUNT-ID-HERE>",
+  "finam-api-url":      "https://api.finam.ru",
+  "finam-account-type": "margin",
+
+  "live-finam": {
+    "live-mode": true,
+    "live-mode-brokerage": "FinamBrokerage",
+
+    "setup-handler":         "QuantConnect.Lean.Engine.Setup.BrokerageSetupHandler",
+    "result-handler":        "QuantConnect.Lean.Engine.Results.LiveTradingResultHandler",
+    "data-feed-handler":     "QuantConnect.Lean.Engine.DataFeeds.LiveTradingDataFeed",
+    "data-queue-handler":    [ "QuantConnect.Brokerages.Finam.FinamBrokerage" ],
+    "real-time-handler":     "QuantConnect.Lean.Engine.RealTime.LiveTradingRealTimeHandler",
+    "transaction-handler":   "QuantConnect.Lean.Engine.TransactionHandlers.BrokerageTransactionHandler",
+    "history-provider":      "BrokerageHistoryProvider"
+  }
+}

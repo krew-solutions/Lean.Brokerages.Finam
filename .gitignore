@@ -427,3 +427,15 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+bin/
+obj/
+.vs/
+*.user
+*.suo
+.idea/
+.vscode/
+*.DotSettings.user
+TestResults/
+NuGet/
+packages/

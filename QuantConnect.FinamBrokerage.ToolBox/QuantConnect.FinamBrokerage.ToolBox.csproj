@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>QuantConnect.ToolBox.FinamDownloader</RootNamespace>
+    <AssemblyName>QuantConnect.ToolBox.FinamDownloader</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="QuantConnect.Lean" Version="2.5.*" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\QuantConnect.FinamBrokerage\QuantConnect.FinamBrokerage.csproj" />
+  </ItemGroup>
+
+</Project>
