@@ -40,6 +40,7 @@ namespace QuantConnect.Brokerages.Finam
     public partial class FinamBrokerage : Brokerage, IDataQueueHandler
     {
         private readonly string _accountId;
+        private readonly string _wsUrl;
         private readonly AccountType _accountType;
         private readonly IAlgorithm _algorithm;
         private readonly IOrderProvider _orderProvider;
@@ -56,13 +57,14 @@ namespace QuantConnect.Brokerages.Finam
         /// Convenience constructor exposed for unit tests; production code reaches
         /// <see cref="FinamBrokerage"/> through <see cref="FinamBrokerageFactory"/>.
         /// </summary>
-        public FinamBrokerage(string apiUrl, string secret, string accountId, AccountType accountType,
+        public FinamBrokerage(string apiUrl, string wsUrl, string secret, string accountId, AccountType accountType,
             IAlgorithm algorithm, IOrderProvider orderProvider, IDataAggregator aggregator)
             : base("Finam Brokerage")
         {
             if (string.IsNullOrEmpty(accountId)) throw new ArgumentException("Finam account id required", nameof(accountId));
 
             _accountId = accountId;
+            _wsUrl = string.IsNullOrEmpty(wsUrl) ? FinamConstants.DefaultWsEndpoint : wsUrl;
             _accountType = accountType;
             _algorithm = algorithm;
             _orderProvider = orderProvider;
@@ -196,10 +198,9 @@ namespace QuantConnect.Brokerages.Finam
                 _ordersByBrokerageId[state.OrderId] = order;
                 _leanToBrokerageOrderId[order.Id] = state.OrderId;
 
-                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
-                {
-                    Status = FinamOrderMapping.ToLeanStatus(state.Status)
-                });
+                // Report acceptance only. Never treat the REST place response as a fill: actual
+                // executions (with price) arrive on the account TRADES stream; final status on ORDERS.
+                EmitStatusOnce(order, OrderStatus.Submitted);
                 return true;
             }
             catch (Exception ex)
@@ -233,10 +234,9 @@ namespace QuantConnect.Brokerages.Finam
             try
             {
                 var state = _api.CancelOrderAsync(_accountId, brokerageId).GetAwaiter().GetResult();
-                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
-                {
-                    Status = state == null ? OrderStatus.CancelPending : FinamOrderMapping.ToLeanStatus(state.Status)
-                });
+                // Optimistic: mark cancel as pending; the final Canceled is confirmed by the ORDERS stream.
+                var status = state == null ? OrderStatus.CancelPending : FinamOrderMapping.ToLeanStatus(state.Status);
+                EmitStatusOnce(order, status == OrderStatus.None ? OrderStatus.CancelPending : status);
                 return true;
             }
             catch (Exception ex)
@@ -249,6 +249,7 @@ namespace QuantConnect.Brokerages.Finam
         public override void Dispose()
         {
             try { Disconnect(); } catch { /* swallow */ }
+            _webSocket?.Dispose();
             _aggregator?.Dispose();
             _cts?.Dispose();
             _api.Dispose();

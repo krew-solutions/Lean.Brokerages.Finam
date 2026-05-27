@@ -31,6 +31,11 @@ namespace QuantConnect.Brokerages.Finam
         public const string DefaultGrpcEndpoint = "https://api.finam.ru:443";
 
         /// <summary>
+        /// Default Finam Trade API WebSocket endpoint (AsyncAPI <c>tradingInfo</c> channel, path <c>/ws</c>).
+        /// </summary>
+        public const string DefaultWsEndpoint = "wss://api.finam.ru/ws";
+
+        /// <summary>
         /// Configuration key used by <c>config.json</c> for the API secret token.
         /// </summary>
         public const string ConfigSecretToken = "finam-secret-token";
@@ -44,6 +49,17 @@ namespace QuantConnect.Brokerages.Finam
         /// Configuration key used by <c>config.json</c> for the API base URL override.
         /// </summary>
         public const string ConfigApiUrl = "finam-api-url";
+
+        /// <summary>
+        /// Configuration key used by <c>config.json</c> for the WebSocket URL override.
+        /// </summary>
+        public const string ConfigWsUrl = "finam-ws-url";
+
+        /// <summary>
+        /// How long live WebSocket data for a symbol is considered fresh before the
+        /// REST <c>LastQuote</c> fallback poll takes over for that symbol.
+        /// </summary>
+        public static readonly System.TimeSpan WebSocketStaleness = System.TimeSpan.FromSeconds(10);
 
         /// <summary>
         /// Configuration key used by <c>config.json</c> for the account category (cash/margin).

@@ -90,6 +90,17 @@ namespace QuantConnect.Brokerages.Finam.Api
             }
         }
 
+        /// <summary>
+        /// Returns a currently valid JWT, (re)authenticating if the cached token is missing or
+        /// close to expiry. Used by the WebSocket client to populate the <c>Authorization</c>
+        /// header on connect and the required <c>token</c> field on each subscription message.
+        /// </summary>
+        public async Task<string> GetValidJwtAsync(CancellationToken ct = default)
+        {
+            await EnsureAuthenticatedAsync(ct).ConfigureAwait(false);
+            return _jwt;
+        }
+
         public Task<GetAccountResponse> GetAccountAsync(string accountId, CancellationToken ct = default)
             => GetAsync<GetAccountResponse>($"v1/accounts/{Uri.EscapeDataString(accountId)}", ct);
 

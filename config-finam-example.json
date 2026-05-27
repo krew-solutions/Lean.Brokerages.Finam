@@ -4,6 +4,7 @@
   "finam-secret-token": "<PUT-YOUR-FINAM-API-SECRET-HERE>",
   "finam-account-id":   "<PUT-YOUR-FINAM-ACCOUNT-ID-HERE>",
   "finam-api-url":      "https://api.finam.ru",
+  "finam-ws-url":       "wss://api.finam.ru/ws",
   "finam-account-type": "margin",
 
   "live-finam": {

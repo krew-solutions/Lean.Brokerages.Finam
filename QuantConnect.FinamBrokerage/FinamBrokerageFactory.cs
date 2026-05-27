@@ -38,6 +38,7 @@ namespace QuantConnect.Brokerages.Finam
             { FinamConstants.ConfigSecretToken, Config.Get(FinamConstants.ConfigSecretToken) },
             { FinamConstants.ConfigAccountId,   Config.Get(FinamConstants.ConfigAccountId) },
             { FinamConstants.ConfigApiUrl,      Config.Get(FinamConstants.ConfigApiUrl, FinamConstants.DefaultRestEndpoint) },
+            { FinamConstants.ConfigWsUrl,       Config.Get(FinamConstants.ConfigWsUrl, FinamConstants.DefaultWsEndpoint) },
             { FinamConstants.ConfigAccountType, Config.Get(FinamConstants.ConfigAccountType, "margin") }
         };
 
@@ -55,6 +56,9 @@ namespace QuantConnect.Brokerages.Finam
             var apiUrl = job.BrokerageData.TryGetValue(FinamConstants.ConfigApiUrl, out var url) && !string.IsNullOrEmpty(url)
                 ? url
                 : FinamConstants.DefaultRestEndpoint;
+            var wsUrl = job.BrokerageData.TryGetValue(FinamConstants.ConfigWsUrl, out var ws) && !string.IsNullOrEmpty(ws)
+                ? ws
+                : FinamConstants.DefaultWsEndpoint;
             var accountTypeValue = job.BrokerageData.TryGetValue(FinamConstants.ConfigAccountType, out var atype) ? atype : "margin";
             var accountType = string.Equals(accountTypeValue, "cash", System.StringComparison.OrdinalIgnoreCase)
                 ? AccountType.Cash
@@ -67,6 +71,7 @@ namespace QuantConnect.Brokerages.Finam
 
             var brokerage = new FinamBrokerage(
                 apiUrl,
+                wsUrl,
                 secret,
                 accountId,
                 accountType,

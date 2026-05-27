@@ -27,7 +27,7 @@ namespace QuantConnect.Brokerages.Finam
     /// Side / type / time-in-force enums are encoded as the gRPC-Gateway JSON string form,
     /// i.e. <c>SIDE_BUY</c>, <c>ORDER_TYPE_LIMIT</c>, etc.
     /// </remarks>
-    internal static class FinamOrderMapping
+    public static class FinamOrderMapping
     {
         public static FinamOrder ToFinam(Order leanOrder, string brokerageSymbol, string accountId)
         {
