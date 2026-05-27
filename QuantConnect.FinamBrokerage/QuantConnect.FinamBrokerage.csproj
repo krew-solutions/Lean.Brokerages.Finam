@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <OutputType>Library</OutputType>
     <RootNamespace>QuantConnect.Brokerages.Finam</RootNamespace>
@@ -28,9 +28,16 @@
     <DefineConstants>TRACE</DefineConstants>
   </PropertyGroup>
 
+  <!--
+    Builds against the local LEAN source tree. QuantConnect.Brokerages transitively
+    pulls in Common, Configuration, Logging, Api and Compression (and Newtonsoft.Json),
+    which covers everything this plugin uses (IBrokerage, IDataAggregator, Composer,
+    Config, Log, LevelOneServiceManager). Adjust the relative path if the LEAN checkout
+    lives elsewhere.
+  -->
   <ItemGroup>
-    <PackageReference Include="QuantConnect.Lean" Version="2.5.*" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <ProjectReference Include="../../trading-reference-applications/Lean/Common/QuantConnect.csproj" />
+    <ProjectReference Include="../../trading-reference-applications/Lean/Brokerages/QuantConnect.Brokerages.csproj" />
   </ItemGroup>
 
 </Project>

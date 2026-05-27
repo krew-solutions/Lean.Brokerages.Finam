@@ -54,8 +54,12 @@ dotnet build -c Release
 dotnet test
 ```
 
-Требуется .NET 9 SDK и доступ к NuGet (`QuantConnect.Lean`).
-DLL после сборки лежит в `QuantConnect.FinamBrokerage/bin/Release/net9.0/QuantConnect.Brokerages.Finam.dll`.
+Требуется **.NET 10 SDK** (`dotnet-sdk-10.0`, как и сам LEAN). Сборка идёт против
+**локального исходника LEAN** через `ProjectReference`, а не NuGet — проекты ссылаются на
+`../../trading-reference-applications/Lean/{Common,Brokerages}/*.csproj`. Если ваш чекаут LEAN
+лежит в другом месте — поправьте относительные пути в трёх `*.csproj`.
+
+DLL после сборки лежит в `QuantConnect.FinamBrokerage/bin/Release/net10.0/QuantConnect.Brokerages.Finam.dll`.
 Скопируйте её в `Lean/Launcher/bin/Release/` рядом с остальными `QuantConnect.Brokerages.*.dll`.
 
 ## Конфигурация (`Lean/Launcher/config.json`)

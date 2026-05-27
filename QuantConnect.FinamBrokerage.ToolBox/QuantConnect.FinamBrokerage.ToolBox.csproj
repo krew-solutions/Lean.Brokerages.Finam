@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <OutputType>Exe</OutputType>
     <RootNamespace>QuantConnect.ToolBox.FinamDownloader</RootNamespace>
@@ -9,11 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="QuantConnect.Lean" Version="2.5.*" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-  </ItemGroup>
-
-  <ItemGroup>
+    <!-- The plugin transitively exposes the LEAN Common/Brokerages projects used here. -->
     <ProjectReference Include="..\QuantConnect.FinamBrokerage\QuantConnect.FinamBrokerage.csproj" />
   </ItemGroup>
 
