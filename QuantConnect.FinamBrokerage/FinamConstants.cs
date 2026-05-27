@@ -21,6 +21,22 @@ namespace QuantConnect.Brokerages.Finam
     public static class FinamConstants
     {
         /// <summary>
+        /// Numeric market identifier registered with <see cref="QuantConnect.Market"/>.
+        /// Built-in markets occupy 0..42; 43..999 are free for custom markets.
+        /// </summary>
+        private const int FinamMarketIdentifier = 100;
+
+        /// <summary>
+        /// Registers the custom <c>finam</c> market so <c>Symbol.Create(..., Market)</c> resolves at
+        /// runtime. Triggered on first access to <see cref="Market"/> (a static field, unlike a const,
+        /// runs the type initializer).
+        /// </summary>
+        static FinamConstants()
+        {
+            QuantConnect.Market.Add(Market, FinamMarketIdentifier);
+        }
+
+        /// <summary>
         /// Default base URL for the Finam Trade API REST gateway (gRPC-Gateway endpoint).
         /// </summary>
         public const string DefaultRestEndpoint = "https://api.finam.ru";
@@ -72,9 +88,11 @@ namespace QuantConnect.Brokerages.Finam
         public const char SymbolSeparator = '@';
 
         /// <summary>
-        /// Default <c>QuantConnect.Market</c> identifier under which Finam instruments are registered.
+        /// Custom <c>QuantConnect.Market</c> name under which Finam instruments are registered.
+        /// A static field (not a const) so that reading it runs the type initializer, which calls
+        /// <see cref="QuantConnect.Market.Add"/>.
         /// </summary>
-        public const string Market = "finam";
+        public static readonly string Market = "finam";
 
         /// <summary>
         /// Default Finam quote level when <see cref="QuoteRequestMaxRetries"/> is reached.

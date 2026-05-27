@@ -4,6 +4,7 @@
 */
 
 using NUnit.Framework;
+using Assert = NUnit.Framework.Legacy.ClassicAssert;
 
 namespace QuantConnect.Brokerages.Finam.Tests
 {

@@ -17,6 +17,16 @@
   <ItemGroup>
     <!-- The plugin transitively exposes the LEAN Common/Brokerages projects used by the tests. -->
     <ProjectReference Include="..\QuantConnect.FinamBrokerage\QuantConnect.FinamBrokerage.csproj" />
+    <!-- Engine provides DefaultDataProvider, used by TestSetup to wire a map-file provider so equity
+         Symbol.Create works in the bare test process (live trading configures this for us). -->
+    <ProjectReference Include="../../trading-reference-applications/Lean/Engine/QuantConnect.Lean.Engine.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="config.json" />
+    <Content Include="config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>

@@ -9,6 +9,7 @@ using QuantConnect.Orders;
 using QuantConnect.Securities;
 using QuantConnect.Securities.Equity;
 using QuantConnect.Data;
+using Assert = NUnit.Framework.Legacy.ClassicAssert;
 
 namespace QuantConnect.Brokerages.Finam.Tests
 {
@@ -24,8 +25,7 @@ namespace QuantConnect.Brokerages.Finam.Tests
                 new Cash("RUB", 0, 1m),
                 SymbolProperties.GetDefault("RUB"),
                 ErrorCurrencyConverter.Instance,
-                RegisteredSecurityDataTypesProvider.Null,
-                new SecurityCache());
+                RegisteredSecurityDataTypesProvider.Null);
         }
 
         [Test]

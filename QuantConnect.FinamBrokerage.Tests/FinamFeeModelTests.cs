@@ -11,6 +11,7 @@ using QuantConnect.Orders;
 using QuantConnect.Orders.Fees;
 using QuantConnect.Securities;
 using QuantConnect.Securities.Equity;
+using Assert = NUnit.Framework.Legacy.ClassicAssert;
 
 namespace QuantConnect.Brokerages.Finam.Tests
 {
@@ -26,8 +27,7 @@ namespace QuantConnect.Brokerages.Finam.Tests
                 new Cash("RUB", 0, 1m),
                 SymbolProperties.GetDefault("RUB"),
                 ErrorCurrencyConverter.Instance,
-                RegisteredSecurityDataTypesProvider.Null,
-                new SecurityCache());
+                RegisteredSecurityDataTypesProvider.Null);
             equity.SetMarketPrice(new Tick(DateTime.UtcNow, symbol, 250m, 250m));
             return equity;
         }
@@ -55,7 +55,7 @@ namespace QuantConnect.Brokerages.Finam.Tests
             var fee = model.GetOrderFee(new OrderFeeParameters(equity, order));
 
             // 10_000 * 250 * 0.000354 ≈ 885
-            Assert.That((double)fee.Value.Amount, Is.EqualTo(885d).Within(1d));
+            Assert.AreEqual(885d, (double)fee.Value.Amount, 1d);
         }
     }
 }

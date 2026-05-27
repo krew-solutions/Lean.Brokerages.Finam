@@ -21,6 +21,7 @@ using System.Threading;
 using QuantConnect.Brokerages.Finam.Api;
 using QuantConnect.Brokerages.LevelOneOrderBook;
 using QuantConnect.Data;
+using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Packets;
 

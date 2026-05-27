@@ -4,9 +4,11 @@
 */
 
 using NUnit.Framework;
+using NUnit.Framework.Legacy;
 using Newtonsoft.Json;
 using QuantConnect.Brokerages.Finam.Api;
 using QuantConnect.Orders;
+using Assert = NUnit.Framework.Legacy.ClassicAssert;
 
 namespace QuantConnect.Brokerages.Finam.Tests
 {

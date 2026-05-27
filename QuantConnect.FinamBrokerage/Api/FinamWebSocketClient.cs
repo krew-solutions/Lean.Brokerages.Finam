@@ -191,8 +191,9 @@ namespace QuantConnect.Brokerages.Finam.Api
                     result = await _socket.ReceiveAsync(new ArraySegment<byte>(buffer), ct).ConfigureAwait(false);
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
-                        throw new WebSocketException(WebSocketError.ConnectionClosedPrematurely,
-                            $"server closed: {result.CloseStatus} {result.CloseStatusDescription}");
+                        // Trigger the reconnect path in RunAsync (which catches any exception).
+                        throw new InvalidOperationException(
+                            $"WebSocket closed by server: {result.CloseStatus} {result.CloseStatusDescription}");
                     }
                     builder.Append(Encoding.UTF8.GetString(buffer, 0, result.Count));
                 }

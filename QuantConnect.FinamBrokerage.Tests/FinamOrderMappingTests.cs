@@ -5,6 +5,7 @@
 
 using System;
 using NUnit.Framework;
+using Assert = NUnit.Framework.Legacy.ClassicAssert;
 using QuantConnect.Orders;
 
 namespace QuantConnect.Brokerages.Finam.Tests
