@@ -141,5 +141,83 @@ namespace QuantConnect.Brokerages.Finam.Tests
             Assert.That(gotData, Is.True,
                 "No DATA frame within 25s. Connection/auth worked (events received), but no market data — likely outside MOEX trading hours.");
         }
+
+        /// <summary>
+        /// Live order lifecycle: place a far-below-market BUY limit (won't execute), confirm it is open,
+        /// then cancel it. Validates the REST order path + request-body serialization and reveals the
+        /// account ORDERS stream format. Double-gated: requires a trading token AND
+        /// QC_FINAM_ALLOW_TRADING=1, so it never trades by accident. Prefer a demo account.
+        /// </summary>
+        [Test]
+        public async Task PlacesAndCancelsLimitOrder()
+        {
+            if (Config.Get("finam-allow-trading") != "1")
+            {
+                Assert.Ignore("Live order test disabled. Set QC_FINAM_ALLOW_TRADING=1 (and a trading token) to enable.");
+            }
+
+            using var api = CreateClient(out _);
+            var accountId = Config.Get(FinamConstants.ConfigAccountId);
+            Assert.That(accountId, Is.Not.Null.And.Not.Empty, "Need QC_FINAM_ACCOUNT_ID for the order test");
+
+            // Watch the account ORDERS stream and log the raw payload (confirms the account-stream wire format).
+            var wsUrl = Config.Get(FinamConstants.ConfigWsUrl, FinamConstants.DefaultWsEndpoint);
+            using var ws = new FinamWebSocketClient(wsUrl, api.GetValidJwtAsync);
+            var orderFrames = new ConcurrentQueue<string>();
+            ws.EnvelopeReceived += e =>
+            {
+                if (e.IsData && e.SubscriptionType == WsSubscriptionType.Orders)
+                {
+                    orderFrames.Enqueue(e.Payload);
+                    Log.Trace($"Smoke.Order: ORDERS frame raw payload: {e.Payload}");
+                }
+            };
+            using var cts = new CancellationTokenSource();
+            ws.Start(cts.Token);
+            await ws.SubscribeOrdersAsync(accountId);
+
+            // BUY limit ~10% below last — within price bands, but won't fill in the test window.
+            var quote = await api.GetLatestQuoteAsync(TestSymbol);
+            var last = quote?.Quote?.Last?.AsDecimal() ?? 0m;
+            Assert.That(last, Is.GreaterThan(0m), "Need a last price to compute a safe limit");
+            var farLimit = decimal.Round(last * 0.90m, 2);
+
+            var request = new FinamOrder
+            {
+                AccountId = accountId,
+                Symbol = TestSymbol,
+                Quantity = FinamDecimal.From(1m),
+                Side = "SIDE_BUY",
+                Type = "ORDER_TYPE_LIMIT",
+                TimeInForce = "TIME_IN_FORCE_DAY",
+                LimitPrice = FinamDecimal.From(farLimit),
+                ClientOrderId = "smk" + DateTime.UtcNow.ToString("HHmmssff")
+            };
+
+            OrderState placed = null;
+            try
+            {
+                placed = await api.PlaceOrderAsync(accountId, request);
+                Log.Trace($"Smoke.Order: placed orderId={placed?.OrderId} status={placed?.Status} limit={farLimit} (last={last})");
+                Assert.That(placed?.OrderId, Is.Not.Null.And.Not.Empty, "PlaceOrder should return an order id");
+
+                var orders = await api.GetOrdersAsync(accountId);
+                var found = orders?.Orders?.Any(o => o.OrderId == placed.OrderId) ?? false;
+                Log.Trace($"Smoke.Order: open orders count={orders?.Orders?.Count}; contains placed={found}");
+
+                // Give the ORDERS stream a moment to push our new order.
+                await Task.Delay(TimeSpan.FromSeconds(4));
+                Log.Trace($"Smoke.Order: ORDERS frames seen={orderFrames.Count}");
+            }
+            finally
+            {
+                if (!string.IsNullOrEmpty(placed?.OrderId))
+                {
+                    var cancelled = await api.CancelOrderAsync(accountId, placed.OrderId);
+                    Log.Trace($"Smoke.Order: cancelled orderId={placed.OrderId} status={cancelled?.Status}");
+                }
+                cts.Cancel();
+            }
+        }
     }
 }
