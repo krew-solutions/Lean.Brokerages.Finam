@@ -101,6 +101,13 @@ namespace QuantConnect.Brokerages.Finam.Api
             return _jwt;
         }
 
+        /// <summary>
+        /// Returns the session/token details, including the list of accessible account ids and the
+        /// read-only flag. Unauthenticated POST (the JWT is passed in the body).
+        /// </summary>
+        public Task<TokenDetailsResponse> GetTokenDetailsAsync(string jwt, CancellationToken ct = default)
+            => PostAsync<TokenDetailsResponse>("v1/sessions/details", new TokenDetailsRequest { Token = jwt }, authenticated: false, ct);
+
         public Task<GetAccountResponse> GetAccountAsync(string accountId, CancellationToken ct = default)
             => GetAsync<GetAccountResponse>($"v1/accounts/{Uri.EscapeDataString(accountId)}", ct);
 
