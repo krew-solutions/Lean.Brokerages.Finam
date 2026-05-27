@@ -66,8 +66,8 @@ namespace QuantConnect.Brokerages.Finam
                     continue;
                 }
 
-                var fillPrice = WsParse.Dec(trade.Price);
-                var absSize = Math.Abs(WsParse.Dec(trade.Size));
+                var fillPrice = trade.Price?.AsDecimal() ?? 0m;
+                var absSize = Math.Abs(trade.Size?.AsDecimal() ?? 0m);
                 if (fillPrice <= 0m || absSize <= 0m) continue;
 
                 var isSell = string.Equals(trade.Side, "SIDE_SELL", StringComparison.OrdinalIgnoreCase);

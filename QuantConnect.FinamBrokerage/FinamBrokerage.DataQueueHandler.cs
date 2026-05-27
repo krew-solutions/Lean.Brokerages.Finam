@@ -178,16 +178,16 @@ namespace QuantConnect.Brokerages.Finam
                 switch (envelope.SubscriptionType)
                 {
                     case WsSubscriptionType.Quotes:
-                        OnQuotes(envelope.Payload.ToObject<WsQuotePayload>());
+                        OnQuotes(envelope.PayloadAs<WsQuotePayload>());
                         break;
                     case WsSubscriptionType.InstrumentTrades:
-                        OnInstrumentTrades(envelope.Payload.ToObject<WsTradesPayload>());
+                        OnInstrumentTrades(envelope.PayloadAs<WsTradesPayload>());
                         break;
                     case WsSubscriptionType.Trades:
-                        OnAccountTrades(envelope.Payload.ToObject<WsAccountTradesPayload>());
+                        OnAccountTrades(envelope.PayloadAs<WsAccountTradesPayload>());
                         break;
                     case WsSubscriptionType.Orders:
-                        OnOrderStates(envelope.Payload.ToObject<WsOrdersPayload>());
+                        OnOrderStates(envelope.PayloadAs<WsOrdersPayload>());
                         break;
                 }
             }
@@ -208,10 +208,10 @@ namespace QuantConnect.Brokerages.Finam
                 _levelOneServiceManager.HandleQuote(
                     symbol,
                     ToUtc(quote.Timestamp),
-                    WsParse.Dec(quote.Bid),
-                    WsParse.Dec(quote.BidSize),
-                    WsParse.Dec(quote.Ask),
-                    WsParse.Dec(quote.AskSize));
+                    quote.Bid?.AsDecimal(),
+                    quote.BidSize?.AsDecimal(),
+                    quote.Ask?.AsDecimal(),
+                    quote.AskSize?.AsDecimal());
             }
         }
 
@@ -225,7 +225,7 @@ namespace QuantConnect.Brokerages.Finam
             var frontier = DateTime.UtcNow - TradeResendFrontier;
             foreach (var trade in payload.Trades.OrderBy(t => t.Timestamp))
             {
-                var price = WsParse.Dec(trade.Price);
+                var price = trade.Price?.AsDecimal() ?? 0m;
                 if (price <= 0m) continue;
 
                 var time = ToUtc(trade.Timestamp);
@@ -239,7 +239,7 @@ namespace QuantConnect.Brokerages.Finam
                     continue;
                 }
 
-                _levelOneServiceManager.HandleLastTrade(symbol, time, WsParse.Dec(trade.Size), price);
+                _levelOneServiceManager.HandleLastTrade(symbol, time, trade.Size?.AsDecimal() ?? 0m, price);
                 _lastTradeBySymbol[symbol] = (trade.TradeId, time);
             }
         }

@@ -4,7 +4,9 @@
 */
 
 using System;
+using System.Collections.Concurrent;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using QuantConnect.Brokerages.Finam.Api;
@@ -92,6 +94,52 @@ namespace QuantConnect.Brokerages.Finam.Tests
             Assert.That(bars?.Bars, Is.Not.Null, "Expected a bars response");
             Log.Trace($"Smoke.ReadsQuoteAndBars: received {bars.Bars.Count} M1 bars; last close={bars.Bars.LastOrDefault()?.Close?.AsDecimal()}");
             Assert.That(bars.Bars.Count, Is.GreaterThan(0), "Expected at least one M1 bar in the last 3 hours (during/after a trading session)");
+        }
+
+        [Test]
+        public async Task StreamsQuotesOverWebSocket()
+        {
+            using var api = CreateClient(out _);
+            var wsUrl = Config.Get(FinamConstants.ConfigWsUrl, FinamConstants.DefaultWsEndpoint);
+
+            var envelopes = new ConcurrentQueue<WsEnvelope>();
+            var dataReceived = new ManualResetEventSlim(false);
+
+            using var ws = new FinamWebSocketClient(wsUrl, api.GetValidJwtAsync);
+            ws.ConnectionError += msg => Log.Trace($"Smoke.WS: connection error: {msg}");
+            ws.EnvelopeReceived += envelope =>
+            {
+                envelopes.Enqueue(envelope);
+                if (envelope.IsEvent) Log.Trace($"Smoke.WS: EVENT {envelope.EventInfo?.Event} {envelope.EventInfo?.Reason}");
+                if (envelope.IsError) Log.Trace($"Smoke.WS: ERROR {envelope.ErrorInfo?.Type} {envelope.ErrorInfo?.Message}");
+                if (envelope.IsData) dataReceived.Set();
+            };
+
+            using var cts = new CancellationTokenSource();
+            ws.Start(cts.Token);
+            await ws.SubscribeQuotesAsync(TestSymbol);
+            await ws.SubscribeInstrumentTradesAsync(TestSymbol);
+
+            // Wait for the first DATA frame (quotes/trades), up to 25s.
+            var gotData = dataReceived.Wait(TimeSpan.FromSeconds(25));
+            cts.Cancel();
+
+            Log.Trace($"Smoke.WS: received {envelopes.Count} envelopes; IsOpen(before cancel)={ws.IsOpen}");
+            Assert.That(envelopes.Count, Is.GreaterThan(0), "Expected at least the handshake/event frames — connection or auth failed");
+
+            // Inspect a quotes DATA frame if present and verify the bare-string decimals parse.
+            var quoteEnvelope = envelopes.FirstOrDefault(e => e.IsData && e.SubscriptionType == WsSubscriptionType.Quotes);
+            if (quoteEnvelope != null)
+            {
+                var payload = quoteEnvelope.PayloadAs<WsQuotePayload>();
+                var quote = payload?.Quote?.FirstOrDefault();
+                Log.Trace($"Smoke.WS: quote {quote?.Symbol} bid={quote?.Bid?.AsDecimal()} ask={quote?.Ask?.AsDecimal()} last={quote?.Last?.AsDecimal()}");
+                Assert.That(quote, Is.Not.Null, "QUOTES DATA frame should contain at least one quote");
+                Assert.That(quote.Ask?.AsDecimal(), Is.GreaterThan(0m), "Quote ask should parse to a positive decimal");
+            }
+
+            Assert.That(gotData, Is.True,
+                "No DATA frame within 25s. Connection/auth worked (events received), but no market data — likely outside MOEX trading hours.");
         }
     }
 }

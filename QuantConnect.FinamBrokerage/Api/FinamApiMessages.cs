@@ -28,7 +28,10 @@ namespace QuantConnect.Brokerages.Finam.Api
         [JsonProperty("value")]
         public string Value { get; set; }
 
-        public decimal AsDecimal() => string.IsNullOrEmpty(Value) ? 0m : decimal.Parse(Value, System.Globalization.CultureInfo.InvariantCulture);
+        public decimal AsDecimal() => string.IsNullOrEmpty(Value)
+            ? 0m
+            // NumberStyles.Float allows the scientific notation the API uses for large values (e.g. "2.0094773E7").
+            : decimal.Parse(Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture);
 
         public static FinamDecimal From(decimal value) => new() { Value = value.ToString(System.Globalization.CultureInfo.InvariantCulture) };
     }

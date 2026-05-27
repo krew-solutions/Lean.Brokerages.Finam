@@ -15,26 +15,23 @@
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 
 namespace QuantConnect.Brokerages.Finam.Api
 {
     /// <summary>
-    /// WebSocket DTOs mirroring the Finam Trade API AsyncAPI 1.0 contract (<c>tradingInfo</c> channel).
+    /// WebSocket DTOs for the Finam Trade API <c>tradingInfo</c> channel.
     /// </summary>
     /// <remarks>
-    /// Unlike the REST gRPC-Gateway, the WebSocket frames encode <c>google.type.Decimal</c> as a
-    /// <em>bare JSON string</em> (e.g. <c>"250.5"</c>) rather than the <c>{ "value": "250.5" }</c>
-    /// wrapper. Hence decimal fields here are plain <see cref="string"/> parsed via
-    /// <see cref="WsParse.Dec"/>.
+    /// Shapes verified against the live stream (the published AsyncAPI was misleading):
+    /// <list type="bullet">
+    ///   <item>the envelope <c>payload</c> is a <em>JSON string</em> (double-encoded), parsed via
+    ///         <see cref="WsEnvelope.PayloadAs{T}"/>;</item>
+    ///   <item>inner field names are camelCase (e.g. <c>askSize</c>);</item>
+    ///   <item>decimals are the <c>{ "value": "..." }</c> wrapper (<see cref="FinamDecimal"/>), same as REST;</item>
+    ///   <item><c>timestamp</c> is a fractional unix epoch (double).</item>
+    /// </list>
     /// </remarks>
-    public static class WsParse
-    {
-        public static decimal Dec(string s) =>
-            string.IsNullOrEmpty(s) ? 0m : decimal.Parse(s, NumberStyles.Any, CultureInfo.InvariantCulture);
-    }
 
     /// <summary>Subscription type discriminator (AsyncAPI <c>SubscriptionType</c>).</summary>
     public static class WsSubscriptionType
@@ -64,20 +61,26 @@ namespace QuantConnect.Brokerages.Finam.Api
         [JsonProperty("token")] public string Token { get; set; }
     }
 
-    /// <summary>Server -> client envelope. <see cref="Payload"/> is parsed lazily by <see cref="SubscriptionType"/>.</summary>
+    /// <summary>
+    /// Server -> client envelope. <see cref="Payload"/> is a JSON string; decode it with
+    /// <see cref="PayloadAs{T}"/> based on <see cref="SubscriptionType"/>.
+    /// </summary>
     public sealed class WsEnvelope
     {
         [JsonProperty("type")] public string Type { get; set; }                       // DATA | ERROR | EVENT
         [JsonProperty("subscription_key")] public string SubscriptionKey { get; set; }
         [JsonProperty("subscription_type")] public string SubscriptionType { get; set; }
-        [JsonProperty("timestamp")] public long Timestamp { get; set; }
-        [JsonProperty("payload")] public JToken Payload { get; set; }
+        [JsonProperty("timestamp")] public double Timestamp { get; set; }
+        [JsonProperty("payload")] public string Payload { get; set; }
         [JsonProperty("error_info")] public WsError ErrorInfo { get; set; }
         [JsonProperty("event_info")] public WsEvent EventInfo { get; set; }
 
         public bool IsData => string.Equals(Type, "DATA", StringComparison.OrdinalIgnoreCase);
         public bool IsError => string.Equals(Type, "ERROR", StringComparison.OrdinalIgnoreCase);
         public bool IsEvent => string.Equals(Type, "EVENT", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Deserializes the (string) <see cref="Payload"/> into the typed payload.</summary>
+        public T PayloadAs<T>() => string.IsNullOrEmpty(Payload) ? default : JsonConvert.DeserializeObject<T>(Payload);
     }
 
     public sealed class WsError
@@ -104,13 +107,13 @@ namespace QuantConnect.Brokerages.Finam.Api
     {
         [JsonProperty("symbol")] public string Symbol { get; set; }
         [JsonProperty("timestamp")] public DateTime Timestamp { get; set; }
-        [JsonProperty("ask")] public string Ask { get; set; }
-        [JsonProperty("ask_size")] public string AskSize { get; set; }
-        [JsonProperty("bid")] public string Bid { get; set; }
-        [JsonProperty("bid_size")] public string BidSize { get; set; }
-        [JsonProperty("last")] public string Last { get; set; }
-        [JsonProperty("last_size")] public string LastSize { get; set; }
-        [JsonProperty("volume")] public string Volume { get; set; }
+        [JsonProperty("ask")] public FinamDecimal Ask { get; set; }
+        [JsonProperty("askSize")] public FinamDecimal AskSize { get; set; }
+        [JsonProperty("bid")] public FinamDecimal Bid { get; set; }
+        [JsonProperty("bidSize")] public FinamDecimal BidSize { get; set; }
+        [JsonProperty("last")] public FinamDecimal Last { get; set; }
+        [JsonProperty("lastSize")] public FinamDecimal LastSize { get; set; }
+        [JsonProperty("volume")] public FinamDecimal Volume { get; set; }
     }
 
     public sealed class WsTradesPayload
@@ -121,11 +124,11 @@ namespace QuantConnect.Brokerages.Finam.Api
 
     public sealed class WsTrade
     {
-        [JsonProperty("trade_id")] public string TradeId { get; set; }
+        [JsonProperty("tradeId")] public string TradeId { get; set; }
         [JsonProperty("mpid")] public string Mpid { get; set; }
         [JsonProperty("timestamp")] public DateTime Timestamp { get; set; }
-        [JsonProperty("price")] public string Price { get; set; }
-        [JsonProperty("size")] public string Size { get; set; }
+        [JsonProperty("price")] public FinamDecimal Price { get; set; }
+        [JsonProperty("size")] public FinamDecimal Size { get; set; }
         [JsonProperty("side")] public string Side { get; set; }
     }
 
@@ -138,20 +141,20 @@ namespace QuantConnect.Brokerages.Finam.Api
     }
 
     /// <summary>
-    /// One own execution. Unlike the market <see cref="WsTrade"/> tape, this carries
-    /// <see cref="OrderId"/> and <see cref="AccountId"/>, so a fill is attributable to a LEAN order;
-    /// <see cref="Price"/> is the actual execution price.
+    /// One own execution from the account TRADES stream. Carries <see cref="OrderId"/> and
+    /// <see cref="AccountId"/>, so a fill is attributable to a LEAN order; <see cref="Price"/> is the
+    /// actual execution price.
     /// </summary>
     public sealed class WsAccountTrade
     {
-        [JsonProperty("trade_id")] public string TradeId { get; set; }
+        [JsonProperty("tradeId")] public string TradeId { get; set; }
         [JsonProperty("symbol")] public string Symbol { get; set; }
-        [JsonProperty("price")] public string Price { get; set; }
-        [JsonProperty("size")] public string Size { get; set; }
+        [JsonProperty("price")] public FinamDecimal Price { get; set; }
+        [JsonProperty("size")] public FinamDecimal Size { get; set; }
         [JsonProperty("side")] public string Side { get; set; }
         [JsonProperty("timestamp")] public DateTime Timestamp { get; set; }
-        [JsonProperty("order_id")] public string OrderId { get; set; }
-        [JsonProperty("account_id")] public string AccountId { get; set; }
+        [JsonProperty("orderId")] public string OrderId { get; set; }
+        [JsonProperty("accountId")] public string AccountId { get; set; }
     }
 
     /// <summary>Payload of the account <c>ORDERS</c> subscription (own order state changes).</summary>
@@ -163,9 +166,9 @@ namespace QuantConnect.Brokerages.Finam.Api
     /// <summary>Minimal order-state projection: enough to drive non-fill status transitions.</summary>
     public sealed class WsOrderState
     {
-        [JsonProperty("order_id")] public string OrderId { get; set; }
-        [JsonProperty("exec_id")] public string ExecId { get; set; }
+        [JsonProperty("orderId")] public string OrderId { get; set; }
+        [JsonProperty("execId")] public string ExecId { get; set; }
         [JsonProperty("status")] public string Status { get; set; }
-        [JsonProperty("transact_at")] public DateTime? TransactAt { get; set; }
+        [JsonProperty("transactAt")] public DateTime? TransactAt { get; set; }
     }
 }
