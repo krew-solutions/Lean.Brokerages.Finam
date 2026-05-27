@@ -16,11 +16,11 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
-using System.Threading.Tasks;
 using QuantConnect.Brokerages.Finam.Api;
+using QuantConnect.Brokerages.LevelOneOrderBook;
 using QuantConnect.Data;
-using QuantConnect.Data.Market;
 using QuantConnect.Logging;
 using QuantConnect.Packets;
 
@@ -30,28 +30,27 @@ namespace QuantConnect.Brokerages.Finam
     /// <see cref="IDataQueueHandler"/> half of the Finam brokerage.
     /// </summary>
     /// <remarks>
-    /// Live data is served primarily by the Finam WebSocket stream (<see cref="FinamWebSocketClient"/>)
-    /// as <see cref="Tick"/>s:
+    /// Follows the standard LEAN live-data pattern (as in the Coinbase / Tastytrade / ThetaData
+    /// providers): the brokerage emits <em>ticks</em> and the engine's <c>IDataAggregator</c>
+    /// consolidates them into the requested bar resolution. We use LEAN's
+    /// <see cref="LevelOneServiceManager"/>, feeding it quotes and trades from the Finam WebSocket:
     /// <list type="bullet">
-    ///   <item><c>QUOTES</c> → quote <see cref="Tick"/> (<c>TickType.Quote</c>);</item>
-    ///   <item><c>INSTRUMENT_TRADES</c> → trade <see cref="Tick"/> (<c>TickType.Trade</c>).</item>
+    ///   <item><c>QUOTES</c> → <see cref="LevelOneServiceManager.HandleQuote"/>;</item>
+    ///   <item><c>INSTRUMENT_TRADES</c> → <see cref="LevelOneServiceManager.HandleLastTrade"/>.</item>
     /// </list>
-    /// Bars are not pushed: the default <c>AggregationManager</c> consolidates these ticks into the
-    /// requested resolution (tick-typed consolidators filter by <c>TickType</c>). Historical bars are
-    /// served separately by <c>GetHistory</c> via REST.
-    /// The REST <c>LastQuote</c> poll is retained as a <em>fallback</em>: it only emits for a symbol
-    /// when the WebSocket is down or has not delivered data for that symbol within
-    /// <see cref="FinamConstants.WebSocketStaleness"/> — keeping live data flowing if the socket
-    /// drops, without double-feeding when the stream is healthy.
+    /// On (re)subscribe Finam replays a snapshot of recent trades, so the trade tape is de-duplicated
+    /// by a 5-minute frontier plus the last seen trade id per symbol (same approach as Coinbase).
+    /// Historical bars are served separately by <c>GetHistory</c> over REST.
     /// </remarks>
     public partial class FinamBrokerage
     {
         private IDataAggregator _aggregator;
+        private LevelOneServiceManager _levelOneServiceManager;
         private FinamWebSocketClient _webSocket;
 
-        private readonly ConcurrentDictionary<Symbol, byte> _subscribedSymbols = new();
+        private static readonly TimeSpan TradeResendFrontier = TimeSpan.FromMinutes(5);
         private readonly ConcurrentDictionary<string, Symbol> _brokerageToLean = new();
-        private readonly ConcurrentDictionary<Symbol, DateTime> _lastWsDataUtc = new();
+        private readonly ConcurrentDictionary<Symbol, (string TradeId, DateTime TimeUtc)> _lastTradeBySymbol = new();
 
         /// <inheritdoc />
         public IEnumerator<BaseData> Subscribe(SubscriptionDataConfig dataConfig, EventHandler newDataAvailableHandler)
@@ -61,31 +60,16 @@ namespace QuantConnect.Brokerages.Finam
                 return null;
             }
 
-            _subscribedSymbols.TryAdd(dataConfig.Symbol, 0);
-
-            var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(dataConfig.Symbol);
-            _brokerageToLean[brokerageSymbol] = dataConfig.Symbol;
-
-            OpenWebSocketSubscriptions(brokerageSymbol);
-
             var enumerator = _aggregator.Add(dataConfig, newDataAvailableHandler);
-            Log.Trace($"FinamBrokerage.Subscribe: {dataConfig.Symbol.Value} ({dataConfig.Resolution})");
+            _levelOneServiceManager.Subscribe(dataConfig);
             return enumerator;
         }
 
         /// <inheritdoc />
         public void Unsubscribe(SubscriptionDataConfig dataConfig)
         {
-            _subscribedSymbols.TryRemove(dataConfig.Symbol, out _);
-
-            if (_webSocket != null)
-            {
-                var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(dataConfig.Symbol);
-                _ = _webSocket.UnsubscribeQuotesAsync(brokerageSymbol);
-                _ = _webSocket.UnsubscribeInstrumentTradesAsync(brokerageSymbol);
-            }
-
-            _aggregator?.Remove(dataConfig);
+            _levelOneServiceManager.Unsubscribe(dataConfig);
+            _aggregator.Remove(dataConfig);
         }
 
         /// <inheritdoc />
@@ -102,22 +86,53 @@ namespace QuantConnect.Brokerages.Finam
             return symbol.SecurityType is SecurityType.Equity or SecurityType.Future or SecurityType.Option or SecurityType.Index;
         }
 
-        private void OpenWebSocketSubscriptions(string brokerageSymbol)
+        /// <summary>
+        /// <see cref="LevelOneServiceManager"/> subscribe callback: maps the LEAN symbols to Finam
+        /// channels (<c>QUOTES</c> for quote/open-interest tick types, <c>INSTRUMENT_TRADES</c> for trades).
+        /// </summary>
+        private bool SubscribeMarketData(IEnumerable<Symbol> symbols, TickType tickType)
         {
-            if (_webSocket == null) return;
+            foreach (var symbol in symbols)
+            {
+                var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
+                _brokerageToLean[brokerageSymbol] = symbol;
 
-            // Live bars are NOT requested from Finam's BARS stream: the default IDataAggregator
-            // (AggregationManager) wires every bar subscription to a tick-based consolidator
-            // (TickConsolidator / TickQuoteBarConsolidator), so it consumes ticks and builds the
-            // bars itself. We therefore feed quote and trade ticks; LEAN consolidates to the
-            // requested resolution. Historical bars are served separately via REST in GetHistory.
-            _ = _webSocket.SubscribeQuotesAsync(brokerageSymbol);
-            _ = _webSocket.SubscribeInstrumentTradesAsync(brokerageSymbol);
+                // Before the socket is up the WS client is null; StartStreaming replays everything on connect.
+                if (_webSocket == null) continue;
+
+                if (tickType == TickType.Trade)
+                {
+                    _ = _webSocket.SubscribeInstrumentTradesAsync(brokerageSymbol);
+                }
+                else
+                {
+                    _ = _webSocket.SubscribeQuotesAsync(brokerageSymbol);
+                }
+            }
+            return true;
+        }
+
+        private bool UnsubscribeMarketData(IEnumerable<Symbol> symbols, TickType tickType)
+        {
+            if (_webSocket == null) return true;
+            foreach (var symbol in symbols)
+            {
+                var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
+                if (tickType == TickType.Trade)
+                {
+                    _ = _webSocket.UnsubscribeInstrumentTradesAsync(brokerageSymbol);
+                }
+                else
+                {
+                    _ = _webSocket.UnsubscribeQuotesAsync(brokerageSymbol);
+                }
+            }
+            return true;
         }
 
         /// <summary>
-        /// Brings up the WebSocket stream (primary) and the REST poll fallback. Invoked by
-        /// <see cref="Connect"/> once the REST session is authenticated.
+        /// Brings up the WebSocket stream (market quotes/trades + account order/trade push).
+        /// Invoked by <see cref="Connect"/> once the REST session is authenticated.
         /// </summary>
         private void StartStreaming(CancellationToken ct)
         {
@@ -130,15 +145,14 @@ namespace QuantConnect.Brokerages.Finam
             _ = _webSocket.SubscribeOrdersAsync(_accountId);
             _ = _webSocket.SubscribeAccountTradesAsync(_accountId);
 
-            // Replay subscriptions that arrived before the socket was up.
-            foreach (var symbol in _subscribedSymbols.Keys)
+            // Replay market-data subscriptions registered before the socket was up.
+            foreach (var symbol in _levelOneServiceManager.GetSubscribedSymbols())
             {
                 var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
                 _brokerageToLean[brokerageSymbol] = symbol;
-                OpenWebSocketSubscriptions(brokerageSymbol);
+                _ = _webSocket.SubscribeQuotesAsync(brokerageSymbol);
+                _ = _webSocket.SubscribeInstrumentTradesAsync(brokerageSymbol);
             }
-
-            StartRestFallbackLoop(ct);
         }
 
         private void OnWebSocketEnvelope(WsEnvelope envelope)
@@ -163,10 +177,10 @@ namespace QuantConnect.Brokerages.Finam
                 switch (envelope.SubscriptionType)
                 {
                     case WsSubscriptionType.Quotes:
-                        EmitQuotes(envelope.Payload.ToObject<WsQuotePayload>());
+                        OnQuotes(envelope.Payload.ToObject<WsQuotePayload>());
                         break;
                     case WsSubscriptionType.InstrumentTrades:
-                        EmitTrades(envelope.Payload.ToObject<WsTradesPayload>());
+                        OnInstrumentTrades(envelope.Payload.ToObject<WsTradesPayload>());
                         break;
                     case WsSubscriptionType.Trades:
                         OnAccountTrades(envelope.Payload.ToObject<WsAccountTradesPayload>());
@@ -182,7 +196,7 @@ namespace QuantConnect.Brokerages.Finam
             }
         }
 
-        private void EmitQuotes(WsQuotePayload payload)
+        private void OnQuotes(WsQuotePayload payload)
         {
             if (payload?.Quote == null) return;
 
@@ -190,109 +204,46 @@ namespace QuantConnect.Brokerages.Finam
             {
                 if (!_brokerageToLean.TryGetValue(quote.Symbol ?? string.Empty, out var symbol)) continue;
 
-                var bid = WsParse.Dec(quote.Bid);
-                var ask = WsParse.Dec(quote.Ask);
-                var time = quote.Timestamp == default ? DateTime.UtcNow : quote.Timestamp;
-                if (bid > 0m && ask > 0m)
-                {
-                    _aggregator?.Update(new Tick(time, symbol, string.Empty, string.Empty,
-                        WsParse.Dec(quote.BidSize), bid, WsParse.Dec(quote.AskSize), ask));
-                    MarkWsData(symbol);
-                }
+                _levelOneServiceManager.HandleQuote(
+                    symbol,
+                    ToUtc(quote.Timestamp),
+                    WsParse.Dec(quote.Bid),
+                    WsParse.Dec(quote.BidSize),
+                    WsParse.Dec(quote.Ask),
+                    WsParse.Dec(quote.AskSize));
             }
         }
 
-        private void EmitTrades(WsTradesPayload payload)
+        private void OnInstrumentTrades(WsTradesPayload payload)
         {
             if (payload?.Trades == null || !_brokerageToLean.TryGetValue(payload.Symbol ?? string.Empty, out var symbol))
             {
                 return;
             }
 
-            foreach (var trade in payload.Trades)
+            var frontier = DateTime.UtcNow - TradeResendFrontier;
+            foreach (var trade in payload.Trades.OrderBy(t => t.Timestamp))
             {
                 var price = WsParse.Dec(trade.Price);
                 if (price <= 0m) continue;
-                var time = trade.Timestamp == default ? DateTime.UtcNow : trade.Timestamp;
-                _aggregator?.Update(new Tick(time, symbol, string.Empty, string.Empty, WsParse.Dec(trade.Size), price));
-                MarkWsData(symbol);
-            }
-        }
 
-        private void MarkWsData(Symbol symbol) => _lastWsDataUtc[symbol] = DateTime.UtcNow;
+                var time = ToUtc(trade.Timestamp);
 
-        // ------------------------------------------------------------------ REST fallback
-
-        /// <summary>
-        /// Slow REST poll of <c>LastQuote</c>. Acts only as a safety net: a symbol is polled
-        /// when the WebSocket is closed or its last stream update is older than
-        /// <see cref="FinamConstants.WebSocketStaleness"/>.
-        /// </summary>
-        private void StartRestFallbackLoop(CancellationToken ct)
-        {
-            _ = Task.Run(async () =>
-            {
-                while (!ct.IsCancellationRequested)
+                // Drop the recent-trades snapshot Finam replays on (re)subscribe: anything older than the
+                // frontier, or not strictly newer than the last print we already forwarded for this symbol.
+                if (time < frontier) continue;
+                if (_lastTradeBySymbol.TryGetValue(symbol, out var last) &&
+                    (time < last.TimeUtc || (time == last.TimeUtc && trade.TradeId == last.TradeId)))
                 {
-                    try
-                    {
-                        foreach (var symbol in _subscribedSymbols.Keys)
-                        {
-                            if (!ShouldRestPoll(symbol)) continue;
-                            await PollAndEmitQuoteAsync(symbol, ct).ConfigureAwait(false);
-                        }
-                    }
-                    catch (OperationCanceledException) { break; }
-                    catch (Exception ex)
-                    {
-                        Log.Error($"FinamBrokerage REST fallback loop error: {ex.Message}");
-                    }
-                    try { await Task.Delay(TimeSpan.FromSeconds(2), ct).ConfigureAwait(false); }
-                    catch (OperationCanceledException) { break; }
+                    continue;
                 }
-            }, ct);
-        }
 
-        private bool ShouldRestPoll(Symbol symbol)
-        {
-            if (_webSocket == null || !_webSocket.IsOpen) return true;
-            if (_lastWsDataUtc.TryGetValue(symbol, out var last) && DateTime.UtcNow - last < FinamConstants.WebSocketStaleness)
-            {
-                return false;
-            }
-            return true;
-        }
-
-        private async Task PollAndEmitQuoteAsync(Symbol symbol, CancellationToken ct)
-        {
-            try
-            {
-                var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
-                var response = await _api.GetLatestQuoteAsync(brokerageSymbol, ct).ConfigureAwait(false);
-                if (response?.Quote == null) return;
-
-                var bid = response.Quote.Bid?.AsDecimal() ?? 0m;
-                var ask = response.Quote.Ask?.AsDecimal() ?? 0m;
-                var last = response.Quote.Last?.AsDecimal() ?? 0m;
-                var time = response.Quote.Timestamp == default ? DateTime.UtcNow : response.Quote.Timestamp;
-
-                if (bid > 0m && ask > 0m)
-                {
-                    _aggregator?.Update(new Tick(time, symbol, string.Empty, string.Empty,
-                        response.Quote.BidSize?.AsDecimal() ?? 0m, bid,
-                        response.Quote.AskSize?.AsDecimal() ?? 0m, ask));
-                }
-                if (last > 0m)
-                {
-                    _aggregator?.Update(new Tick(time, symbol, string.Empty, string.Empty,
-                        response.Quote.LastSize?.AsDecimal() ?? 0m, last));
-                }
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                Log.Debug($"FinamBrokerage.PollAndEmitQuoteAsync({symbol}): {ex.Message}");
+                _levelOneServiceManager.HandleLastTrade(symbol, time, WsParse.Dec(trade.Size), price);
+                _lastTradeBySymbol[symbol] = (trade.TradeId, time);
             }
         }
+
+        private static DateTime ToUtc(DateTime value)
+            => value == default ? DateTime.UtcNow : value.ToUniversalTime();
     }
 }

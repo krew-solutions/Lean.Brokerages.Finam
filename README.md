@@ -40,8 +40,9 @@ FinamBrokerage
 ```
 
 - **Управление заявками / счёт / история** идут через gRPC-Gateway REST Finam (поверх `HttpClient`, без `Grpc.Net.Client`; контракт совпадает с gRPC по полям).
-- **Live-данные** — через WebSocket (`wss://api.finam.ru/ws`, AsyncAPI `tradingInfo`): подписки `QUOTES` и `INSTRUMENT_TRADES` отдаются в LEAN как **тики** (`Tick` с правильным `TickType` — `Quote`/`Trade`). Бары LEAN строит сам: дефолтный `AggregationManager` ставит на бар-подписку tick-консолидатор (`TickConsolidator`/`TickQuoteBarConsolidator`), поэтому WS-`BARS` для live не используется (исторические бары — отдельно, REST в `GetHistory`).
-- **Fallback:** если WS недоступен или по символу нет данных дольше `WebSocketStaleness` (10 с) — включается REST-поллинг `LastQuote` (раз в 2 с) только по «протухшим» символам, чтобы не дублировать поток при здоровом сокете.
+- **Live-данные** — стандартный путь LEAN через `LevelOneServiceManager` (как в брокерах Coinbase / Tastytrade / ThetaData): из WebSocket приходят **тики** — `QUOTES` → `HandleQuote`, `INSTRUMENT_TRADES` → `HandleLastTrade` — а движок (`IDataAggregator`) сам консолидирует их в бары нужной резолюции. WS-`BARS` для live не используется; история — отдельно, REST в `GetHistory`.
+- **Дедуп ленты:** на (пере)подписку Finam досылает снапшот недавних сделок, поэтому `INSTRUMENT_TRADES` фильтруется по 5-мин фронтиру + последнему `trade_id` на символ. Account-fills (`TRADES`) дедупятся по `trade_id`, чтобы reconnect не задвоил исполнение.
+- **Авторизация WS** — JWT в заголовке `Authorization` при коннекте; тот же токен дублируется в обязательном поле `token` каждого сообщения-подписки.
 - **Авторизация WS** — JWT в заголовке `Authorization` при коннекте; тот же токен дублируется в обязательном поле `token` каждого сообщения-подписки.
 
 ## Сборка
@@ -95,12 +96,10 @@ DLL после сборки лежит в `QuantConnect.FinamBrokerage/bin/Relea
 | `GetAccountHoldings` | ✅ | REST `GET /v1/accounts/{id}` |
 | `GetCashBalance` | ✅ | Из `cash` в ответе `GetAccount` |
 | `GetHistory` (Minute/Hour/Daily) | ✅ | REST `GET /v1/instruments/{symbol}/bars` |
-| `IDataQueueHandler` — live тики | ✅ | WS `QUOTES` → quote-`Tick`, `INSTRUMENT_TRADES` → trade-`Tick` |
-| Live-бары (Minute/Hour/Daily) | ✅ | Строит LEAN из тиков (tick-консолидаторы дефолтного `AggregationManager`); WS-`BARS` для live не нужен |
+| `IDataQueueHandler` — live тики | ✅ | `LevelOneServiceManager`: WS `QUOTES` → `HandleQuote`, `INSTRUMENT_TRADES` → `HandleLastTrade`; дедуп ленты (5-мин фронтир + `trade_id`) |
+| Live-бары (Minute/Hour/Daily/…) | ✅ | Строит движок из тиков (`IDataAggregator`); WS-`BARS` для live не нужен |
 | WS auto-reconnect + replay подписок | ✅ | Экспоненциальный backoff, повторная авторизация свежим JWT |
-| REST-fallback при падении WS | ✅ | Поллинг `LastQuote` только по символам без свежих WS-данных (>10 с) |
-| `UpdateOrder` | ❌ | Finam Trade API не имеет RPC `ModifyOrder` — алгоритм должен cancel+replace |
-| Push fills с реальной ценой (WS `TRADES` по счёту) | ✅ | `OrderEvent.FillPrice/FillQuantity` из `AccountTrade` (`order_id`+`price`); `PlaceOrder` больше не шлёт «оптимистичный» `Filled` |
+| Push fills с реальной ценой (WS `TRADES` по счёту) | ✅ | `OrderEvent.FillPrice/FillQuantity` из `AccountTrade` (`order_id`+`price`), дедуп по `trade_id`; `PlaceOrder` не шлёт «оптимистичный» `Filled` |
 | Push статусов заявок (WS `ORDERS` по счёту) | ✅ | Submitted/Canceled/Rejected push'ем; дедуп по (order, status) |
 | Комиссия в fill-событии | ⚠️ | `AccountTrade` не несёт комиссию (Finam шлёт её отдельной COMMISSION-транзакцией) — fill идёт с `OrderFee.Zero`, реальные сборы сверяются через cash sync |
 | SL/TP-заявки | ⚠️ | DTO готов, но `PlaceSLTPOrder` пока не вызывается из LEAN `Order`. |
@@ -157,8 +156,8 @@ dotnet run --project QuantConnect.FinamBrokerage.ToolBox -- \
 
 ## Дорожная карта
 
-1. ~~Заменить REST-поллинг `LastQuote` на стрим рыночных данных.~~ ✅ Сделано через WebSocket (`BARS`/`QUOTES`/`INSTRUMENT_TRADES`), REST остался fallback'ом.
-2. ~~Подписаться на WS `ORDERS` / `TRADES` для push статуса заявок и исполнений.~~ ✅ Сделано: fills с реальной ценой из `AccountTrade`, статусы из `ORDERS`. Остался WS `ACCOUNT` (push изменений портфеля) и проброс комиссии из COMMISSION-транзакций в `OrderFee`.
+1. ~~Стрим рыночных данных.~~ ✅ Live-тики через WS `QUOTES`/`INSTRUMENT_TRADES` → `LevelOneServiceManager`, движок консолидирует в бары (идиом Coinbase/Tastytrade/ThetaData).
+2. ~~WS `ORDERS`/`TRADES` для push статуса заявок и исполнений.~~ ✅ fills с реальной ценой из `AccountTrade`, статусы из `ORDERS`. Остался WS `ACCOUNT` (push портфеля), проброс комиссии из COMMISSION-транзакций, и REST-ресинк заявок/fills при долгом разрыве WS.
 3. Поддержать `PlaceSLTPOrder` через `BracketOrder` или кастомное расширение.
 4. Подключить `OptionChainProvider` через `/v1/assets/{underlying}/options`.
 5. Реализовать `FinamSymbolMapperFile` с офлайн-снимком universe инструментов.

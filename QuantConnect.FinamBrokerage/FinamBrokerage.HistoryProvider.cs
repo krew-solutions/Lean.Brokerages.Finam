@@ -58,10 +58,13 @@ namespace QuantConnect.Brokerages.Finam
             if (state.Bars == null) yield break;
 
             var period = request.Resolution.ToTimeSpan();
+            var exchangeTimeZone = request.ExchangeHours.TimeZone;
             foreach (var bar in state.Bars)
             {
+                // Finam bar timestamps are UTC; LEAN bar Time must be in the symbol's exchange time zone.
+                var barTime = bar.Timestamp.ToUniversalTime().ConvertFromUtc(exchangeTimeZone);
                 yield return new TradeBar(
-                    bar.Timestamp,
+                    barTime,
                     request.Symbol,
                     bar.Open?.AsDecimal() ?? 0m,
                     bar.High?.AsDecimal() ?? 0m,

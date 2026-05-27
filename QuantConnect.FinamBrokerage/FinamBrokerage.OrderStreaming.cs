@@ -43,6 +43,7 @@ namespace QuantConnect.Brokerages.Finam
     {
         private readonly ConcurrentDictionary<string, decimal> _cumulativeFillByBrokerageId = new();
         private readonly ConcurrentDictionary<int, OrderStatus> _lastEmittedStatus = new();
+        private readonly ConcurrentDictionary<string, byte> _seenTradeIds = new();
 
         private void OnAccountTrades(WsAccountTradesPayload payload)
         {
@@ -50,6 +51,13 @@ namespace QuantConnect.Brokerages.Finam
 
             foreach (var trade in payload.Trades)
             {
+                // Dedup: the account TRADES stream replays recent executions on (re)connect; emitting the
+                // same fill twice would double-count the position.
+                if (!string.IsNullOrEmpty(trade.TradeId) && !_seenTradeIds.TryAdd(trade.TradeId, 0))
+                {
+                    continue;
+                }
+
                 if (string.IsNullOrEmpty(trade.OrderId) ||
                     !_ordersByBrokerageId.TryGetValue(trade.OrderId, out var order))
                 {

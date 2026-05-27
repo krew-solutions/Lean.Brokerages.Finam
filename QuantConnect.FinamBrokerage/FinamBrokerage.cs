@@ -19,12 +19,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using QuantConnect.Brokerages.Finam.Api;
+using QuantConnect.Brokerages.LevelOneOrderBook;
 using QuantConnect.Data;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Packets;
 using QuantConnect.Securities;
+using QuantConnect.Util;
 
 namespace QuantConnect.Brokerages.Finam
 {
@@ -71,6 +73,7 @@ namespace QuantConnect.Brokerages.Finam
             _symbolMapper = new FinamSymbolMapper();
             _api = new FinamApiClient(apiUrl ?? FinamConstants.DefaultRestEndpoint, secret);
             _aggregator = aggregator;
+            _levelOneServiceManager = new LevelOneServiceManager(_aggregator, SubscribeMarketData, UnsubscribeMarketData);
         }
 
         /// <inheritdoc />
@@ -250,6 +253,7 @@ namespace QuantConnect.Brokerages.Finam
         {
             try { Disconnect(); } catch { /* swallow */ }
             _webSocket?.Dispose();
+            _levelOneServiceManager?.DisposeSafely();
             _aggregator?.Dispose();
             _cts?.Dispose();
             _api.Dispose();
