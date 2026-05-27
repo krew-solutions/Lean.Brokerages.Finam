@@ -52,10 +52,14 @@ namespace QuantConnect.Brokerages.Finam
             try
             {
                 var mhdb = MarketHoursDatabase.FromDataFolder();
-                foreach (var securityType in new[] { SecurityType.Equity, SecurityType.Future, SecurityType.Option, SecurityType.Index })
-                {
-                    mhdb.SetEntryAlwaysOpen(Market, null, securityType, TimeZones.Moscow);
-                }
+                var moex = FinamMarketHours.MoexEquity();
+                mhdb.SetEntry(Market, null, SecurityType.Equity, moex, TimeZones.Moscow);
+                mhdb.SetEntry(Market, null, SecurityType.Index, moex, TimeZones.Moscow);
+
+                // FORTS (futures/options) trades on a different schedule than equities; until that is
+                // modelled, keep them always-open so subscriptions/fills are not gated incorrectly.
+                mhdb.SetEntryAlwaysOpen(Market, null, SecurityType.Future, TimeZones.Moscow);
+                mhdb.SetEntryAlwaysOpen(Market, null, SecurityType.Option, TimeZones.Moscow);
             }
             catch (Exception ex)
             {
