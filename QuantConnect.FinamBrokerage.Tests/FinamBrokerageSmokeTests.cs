@@ -78,7 +78,9 @@ namespace QuantConnect.Brokerages.Finam.Tests
         {
             using var api = CreateClient(out _);
 
-            var asset = await api.GetAssetAsync(TestSymbol);
+            // /v1/assets/{symbol} requires the account_id query parameter (the live API 400s without it).
+            var accountId = Config.Get(FinamConstants.ConfigAccountId);
+            var asset = await api.GetAssetAsync(TestSymbol, accountId);
             Log.Trace($"Smoke.ReadsQuoteAndBars: asset {TestSymbol} -> ticker={asset?.Ticker} mic={asset?.Mic} decimals={asset?.Decimals} lot={asset?.LotSize?.AsDecimal()}");
 
             var quote = await api.GetLatestQuoteAsync(TestSymbol);

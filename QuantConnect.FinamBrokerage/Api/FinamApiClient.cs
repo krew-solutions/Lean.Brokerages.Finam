@@ -21,6 +21,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
 using QuantConnect.Logging;
 
 namespace QuantConnect.Brokerages.Finam.Api
@@ -39,10 +40,18 @@ namespace QuantConnect.Brokerages.Finam.Api
     public sealed class FinamApiClient : IDisposable
     {
         private static readonly TimeSpan TokenRefreshSkew = TimeSpan.FromMinutes(2);
+
+        // Finam's gRPC-Gateway emits/accepts snake_case JSON (e.g. account_id, expires_at, limit_price).
+        // OverrideSpecifiedNames lets the strategy snake-case our camelCase [JsonProperty] names too,
+        // so both serialization (request bodies) and deserialization (responses) match the wire format.
         private static readonly JsonSerializerSettings JsonSettings = new()
         {
             NullValueHandling = NullValueHandling.Ignore,
-            DateFormatHandling = DateFormatHandling.IsoDateFormat
+            DateFormatHandling = DateFormatHandling.IsoDateFormat,
+            ContractResolver = new DefaultContractResolver
+            {
+                NamingStrategy = new SnakeCaseNamingStrategy { OverrideSpecifiedNames = true }
+            }
         };
 
         private readonly HttpClient _http;
@@ -72,7 +81,9 @@ namespace QuantConnect.Brokerages.Finam.Api
                 var response = await PostAsync<AuthResponse>("v1/sessions", new AuthRequest { Secret = _secret }, authenticated: false, ct).ConfigureAwait(false);
                 _jwt = response.Token;
                 var details = await PostAsync<TokenDetailsResponse>("v1/sessions/details", new TokenDetailsRequest { Token = _jwt }, authenticated: false, ct).ConfigureAwait(false);
-                _jwtExpiresAt = details?.ExpiresAt ?? DateTime.UtcNow.AddMinutes(10);
+                // Fall back to a short lifetime if the API omits/returns an unusable expiry.
+                var expiresAt = details?.ExpiresAt ?? default;
+                _jwtExpiresAt = expiresAt > DateTime.UtcNow ? expiresAt : DateTime.UtcNow.AddMinutes(10);
                 Log.Trace($"FinamApiClient: authenticated, jwt expires at {_jwtExpiresAt:O}");
                 return _jwt;
             }
@@ -84,7 +95,8 @@ namespace QuantConnect.Brokerages.Finam.Api
 
         private async Task EnsureAuthenticatedAsync(CancellationToken ct)
         {
-            if (string.IsNullOrEmpty(_jwt) || DateTime.UtcNow >= _jwtExpiresAt - TokenRefreshSkew)
+            // Compare without subtracting from _jwtExpiresAt (which could be DateTime.MinValue and underflow).
+            if (string.IsNullOrEmpty(_jwt) || _jwtExpiresAt <= DateTime.UtcNow.Add(TokenRefreshSkew))
             {
                 await AuthenticateAsync(ct).ConfigureAwait(false);
             }
