@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <OutputType>Library</OutputType>
+    <RootNamespace>QuantConnect.Algorithm.CSharp</RootNamespace>
+    <AssemblyName>QuantConnect.FinamBrokerage.DemoAlgorithm</AssemblyName>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- QCAlgorithm base. Brings Common transitively. -->
+    <ProjectReference Include="../../../trading-reference-applications/Lean/Algorithm/QuantConnect.Algorithm.csproj" />
+  </ItemGroup>
+
+</Project>

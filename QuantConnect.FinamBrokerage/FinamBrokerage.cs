@@ -20,6 +20,7 @@ using System.Linq;
 using System.Threading;
 using QuantConnect.Brokerages.Finam.Api;
 using QuantConnect.Brokerages.LevelOneOrderBook;
+using QuantConnect.Configuration;
 using QuantConnect.Data;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
@@ -73,7 +74,17 @@ namespace QuantConnect.Brokerages.Finam
             _orderProvider = orderProvider;
             _symbolMapper = new FinamSymbolMapper();
             _api = new FinamApiClient(apiUrl ?? FinamConstants.DefaultRestEndpoint, secret);
-            _aggregator = aggregator;
+
+            // Finam MOEX accounts settle in RUB; without this the engine defaults to USD and fails to
+            // find a RUB conversion rate. TODO: detect per-account for US-market Finam accounts.
+            AccountBaseCurrency = "RUB";
+
+            // The aggregator may not be registered with the Composer yet when the factory builds us
+            // (Coinbase/ThetaData handle this the same way); fall back to the configured implementation.
+            _aggregator = aggregator
+                ?? Composer.Instance.GetPart<IDataAggregator>()
+                ?? Composer.Instance.GetExportedValueByTypeName<IDataAggregator>(
+                       Config.Get("data-aggregator", "QuantConnect.Lean.Engine.DataFeeds.AggregationManager"));
             _levelOneServiceManager = new LevelOneServiceManager(_aggregator, SubscribeMarketData, UnsubscribeMarketData);
         }
 

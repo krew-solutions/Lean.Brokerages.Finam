@@ -15,6 +15,10 @@
 
 namespace QuantConnect.Brokerages.Finam
 {
+    using System;
+    using QuantConnect.Logging;
+    using QuantConnect.Securities;
+
     /// <summary>
     /// Compile-time constants shared by the Finam brokerage implementation.
     /// </summary>
@@ -27,13 +31,37 @@ namespace QuantConnect.Brokerages.Finam
         private const int FinamMarketIdentifier = 100;
 
         /// <summary>
-        /// Registers the custom <c>finam</c> market so <c>Symbol.Create(..., Market)</c> resolves at
-        /// runtime. Triggered on first access to <see cref="Market"/> (a static field, unlike a const,
-        /// runs the type initializer).
+        /// Registers the custom <c>finam</c> market and its market hours so the engine can resolve
+        /// <c>Symbol.Create(..., Market)</c> and <c>MarketHoursDatabase</c> lookups at runtime.
+        /// Triggered on first access to <see cref="Market"/> (a static field, unlike a const, runs the
+        /// type initializer); the factory touches it before the algorithm initializes.
         /// </summary>
         static FinamConstants()
         {
             QuantConnect.Market.Add(Market, FinamMarketIdentifier);
+            RegisterMarketHours();
+        }
+
+        /// <summary>
+        /// Registers always-open Moscow-time market hours for the custom market, best-effort.
+        /// TODO: replace with real MOEX sessions (main 10:00–18:45 plus morning/evening) once
+        /// the schedule is wired from the Finam <c>/v1/assets/{symbol}/schedule</c> endpoint.
+        /// </summary>
+        private static void RegisterMarketHours()
+        {
+            try
+            {
+                var mhdb = MarketHoursDatabase.FromDataFolder();
+                foreach (var securityType in new[] { SecurityType.Equity, SecurityType.Future, SecurityType.Option, SecurityType.Index })
+                {
+                    mhdb.SetEntryAlwaysOpen(Market, null, securityType, TimeZones.Moscow);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Needs a configured data folder; harmless to skip in contexts that don't trade (e.g. pure REST).
+                Log.Trace($"FinamConstants: could not register market hours ({ex.Message}).");
+            }
         }
 
         /// <summary>

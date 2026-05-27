@@ -1,0 +1,45 @@
+{
+  "environment": "live-finam",
+
+  "algorithm-type-name": "FinamDataOnlyAlgorithm",
+  "algorithm-language": "CSharp",
+  "algorithm-location": "QuantConnect.FinamBrokerage.DemoAlgorithm.dll",
+
+  "data-folder": "__DATA_FOLDER__",
+  "debugging": false,
+
+  "log-handler": "QuantConnect.Logging.CompositeLogHandler",
+  "messaging-handler": "QuantConnect.Messaging.Messaging",
+  "job-queue-handler": "QuantConnect.Queues.JobQueue",
+  "api-handler": "QuantConnect.Api.Api",
+  "map-file-provider": "QuantConnect.Data.Auxiliary.LocalDiskMapFileProvider",
+  "factor-file-provider": "QuantConnect.Data.Auxiliary.LocalDiskFactorFileProvider",
+  "data-provider": "QuantConnect.Lean.Engine.DataFeeds.DefaultDataProvider",
+  "data-channel-provider": "DataChannelProvider",
+  "object-store": "QuantConnect.Lean.Engine.Storage.LocalObjectStore",
+  "data-aggregator": "QuantConnect.Lean.Engine.DataFeeds.AggregationManager",
+
+  "job-user-id": "0",
+  "api-access-token": "",
+  "job-project-id": "0",
+
+  "finam-secret-token": "__TOKEN__",
+  "finam-account-id": "__ACCOUNT__",
+  "finam-api-url": "https://api.finam.ru",
+  "finam-ws-url": "wss://api.finam.ru/ws",
+  "finam-account-type": "margin",
+
+  "environments": {
+    "live-finam": {
+      "live-mode": true,
+      "live-mode-brokerage": "FinamBrokerage",
+      "data-queue-handler": [ "FinamBrokerage" ],
+      "setup-handler": "QuantConnect.Lean.Engine.Setup.BrokerageSetupHandler",
+      "result-handler": "QuantConnect.Lean.Engine.Results.LiveTradingResultHandler",
+      "data-feed-handler": "QuantConnect.Lean.Engine.DataFeeds.LiveTradingDataFeed",
+      "real-time-handler": "QuantConnect.Lean.Engine.RealTime.LiveTradingRealTimeHandler",
+      "transaction-handler": "QuantConnect.Lean.Engine.TransactionHandlers.BrokerageTransactionHandler",
+      "history-provider": [ "BrokerageHistoryProvider", "SubscriptionDataReaderHistoryProvider" ]
+    }
+  }
+}

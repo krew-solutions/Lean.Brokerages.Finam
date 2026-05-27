@@ -29,6 +29,14 @@ namespace QuantConnect.Brokerages.Finam
     /// </summary>
     public class FinamBrokerageFactory : BrokerageFactory
     {
+        static FinamBrokerageFactory()
+        {
+            // The Composer instantiates the factory during brokerage discovery (before the algorithm's
+            // Initialize), so touching FinamConstants.Market here registers the custom "finam" market
+            // in time for AddEquity(..., market: "finam") to resolve.
+            _ = FinamConstants.Market;
+        }
+
         public FinamBrokerageFactory() : base(typeof(FinamBrokerage))
         {
         }
