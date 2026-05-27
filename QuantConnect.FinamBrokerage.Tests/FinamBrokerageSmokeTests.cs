@@ -176,11 +176,11 @@ namespace QuantConnect.Brokerages.Finam.Tests
             ws.Start(cts.Token);
             await ws.SubscribeOrdersAsync(accountId);
 
-            // BUY limit ~10% below last — within price bands, but won't fill in the test window.
+            // BUY limit ~5% below last — inside the exchange price band, but won't fill in the test window.
             var quote = await api.GetLatestQuoteAsync(TestSymbol);
             var last = quote?.Quote?.Last?.AsDecimal() ?? 0m;
             Assert.That(last, Is.GreaterThan(0m), "Need a last price to compute a safe limit");
-            var farLimit = decimal.Round(last * 0.90m, 2);
+            var farLimit = decimal.Round(last * 0.95m, 2);
 
             var request = new FinamOrder
             {
