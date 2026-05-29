@@ -24,19 +24,25 @@ namespace QuantConnect.Brokerages.Finam
     /// Builds <see cref="SecurityExchangeHours"/> for the custom Finam markets.
     /// </summary>
     /// <remarks>
-    /// Approximate MOEX equity sessions in Moscow time: main 10:00–18:50 and evening 19:05–23:50,
-    /// Monday–Friday. The morning session (≈07:00–09:50), the closing-auction nuances, holidays and
-    /// the separate FORTS (futures/options) schedule are TODOs — refine from the Finam
-    /// <c>/v1/assets/{symbol}/schedule</c> endpoint.
+    /// MOEX equity sessions in Moscow time, Monday–Friday, taken from the Finam
+    /// <c>/v1/assets/{symbol}/schedule</c> endpoint (EARLY/CORE/LATE_TRADING with auctions between):
+    /// morning 07:00–09:50, main 10:00–18:55, evening 19:00–23:50. The thin morning and evening
+    /// sessions are mapped to <see cref="MarketHoursState.PreMarket"/> / <see cref="MarketHoursState.PostMarket"/>
+    /// so a plain <c>AddEquity</c> trades the main session only; subscribing with
+    /// <c>extendedMarketHours: true</c> opts into the morning/evening tape Finam also delivers. The
+    /// brief opening/closing auction windows (09:50–10:00, 18:55–19:00) are left as gaps; no
+    /// quarter-hour bar starts inside them. Holidays and the separate FORTS (futures/options)
+    /// schedule remain TODOs.
     /// </remarks>
     public static class FinamMarketHours
     {
         public static SecurityExchangeHours MoexEquity()
         {
-            var main = new MarketHoursSegment(MarketHoursState.Market, new TimeSpan(10, 0, 0), new TimeSpan(18, 50, 0));
-            var evening = new MarketHoursSegment(MarketHoursState.Market, new TimeSpan(19, 5, 0), new TimeSpan(23, 50, 0));
+            var morning = new MarketHoursSegment(MarketHoursState.PreMarket, new TimeSpan(7, 0, 0), new TimeSpan(9, 50, 0));
+            var main = new MarketHoursSegment(MarketHoursState.Market, new TimeSpan(10, 0, 0), new TimeSpan(18, 55, 0));
+            var evening = new MarketHoursSegment(MarketHoursState.PostMarket, new TimeSpan(19, 0, 0), new TimeSpan(23, 50, 0));
 
-            LocalMarketHours TradingDay(DayOfWeek day) => new(day, main, evening);
+            LocalMarketHours TradingDay(DayOfWeek day) => new(day, morning, main, evening);
             LocalMarketHours Closed(DayOfWeek day) => new(day); // no segments => closed all day
 
             var byDay = new Dictionary<DayOfWeek, LocalMarketHours>
