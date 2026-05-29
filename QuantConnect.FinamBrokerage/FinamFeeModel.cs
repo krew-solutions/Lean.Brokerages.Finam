@@ -24,13 +24,13 @@ namespace QuantConnect.Brokerages.Finam
     /// Approximate Finam retail commission model.
     /// </summary>
     /// <remarks>
-    /// Finam уровня "Стандартный" — 0.0354% от оборота для акций MOEX, минимум 35 ₽,
-    /// для срочного рынка фиксированная ставка за контракт.
-    /// Эти значения нужно подтверждать тарифом конкретного клиента.
+    /// Тариф Finam "Инвестор" — 0.035% от оборота для акций MOEX
+    /// (https://broker.finam.ru/landing/tariffs-n3-investor/). Срочный рынок — фиксированная
+    /// ставка за контракт. Минимум за поручение оставлен как заглушка и требует проверки тарифа.
     /// </remarks>
     public class FinamFeeModel : FeeModel
     {
-        private const decimal MoexEquityRate = 0.000354m;
+        private const decimal MoexEquityRate = 0.00035m;
         private const decimal MoexEquityMinFee = 35m;
         private const decimal FortsContractFee = 0.45m;
         private const decimal UsEquityPerShare = 0.02m;
