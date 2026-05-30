@@ -14,7 +14,11 @@
 */
 
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+
+// Exposes internal helpers (e.g. FinamBrokerage.ToAggressorCode) to the test assembly.
+[assembly: InternalsVisibleTo("QuantConnect.Brokerages.Finam.Tests")]
 
 [assembly: AssemblyTitle("QuantConnect.Brokerages.Finam")]
 [assembly: AssemblyDescription("Finam Trade API brokerage plugin for QuantConnect LEAN")]
