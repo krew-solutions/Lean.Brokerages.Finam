@@ -239,12 +239,45 @@ namespace QuantConnect.Brokerages.Finam
                     continue;
                 }
 
-                _levelOneServiceManager.HandleLastTrade(symbol, time, trade.Size?.AsDecimal() ?? 0m, price);
+                // Preserve the aggressor side (Finam Trade.side) by passing it as the trade tick's
+                // SaleCondition ("B" = buyer-initiated, "S" = seller-initiated, "" = unknown). Dropping
+                // it (as a bare HandleLastTrade call does) makes a real Cumulative Volume Delta
+                // impossible. Lean serializes SaleCondition in equity trade-tick files too, so backtests
+                // see the same flag. Consumed by QuantConnect.TradingLean.Indicators.CumulativeVolumeDelta.
+                _levelOneServiceManager.HandleLastTrade(
+                    symbol, time, trade.Size?.AsDecimal() ?? 0m, price, ToAggressorCode(trade.Side));
                 _lastTradeBySymbol[symbol] = (trade.TradeId, time);
             }
         }
 
         private static DateTime ToUtc(DateTime value)
             => value == default ? DateTime.UtcNow : value.ToUniversalTime();
+
+        /// <summary>
+        /// Maps Finam's trade aggressor side (<c>Trade.side</c>) to a one-character SaleCondition flag
+        /// carried on the Lean trade tick: "B" = buyer-initiated, "S" = seller-initiated, "" = unknown.
+        /// Accepts the proto enum names (SIDE_BUY/SIDE_SELL), REST spellings (buy/sell) and numeric codes.
+        /// </summary>
+        internal static string ToAggressorCode(string side)
+        {
+            if (string.IsNullOrEmpty(side))
+            {
+                return string.Empty;
+            }
+
+            switch (side.Trim().ToUpperInvariant())
+            {
+                case "1":
+                case "BUY":
+                case "SIDE_BUY":
+                    return "B";
+                case "2":
+                case "SELL":
+                case "SIDE_SELL":
+                    return "S";
+                default:
+                    return string.Empty;
+            }
+        }
     }
 }
