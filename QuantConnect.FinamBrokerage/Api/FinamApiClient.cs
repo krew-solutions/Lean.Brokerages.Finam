@@ -145,6 +145,15 @@ namespace QuantConnect.Brokerages.Finam.Api
         public Task<QuoteResponse> GetLatestQuoteAsync(string symbol, CancellationToken ct = default)
             => GetAsync<QuoteResponse>($"v1/instruments/{Uri.EscapeDataString(symbol)}/quotes/latest", ct);
 
+        /// <summary>
+        /// REST <c>MarketDataService.LatestTrades</c>: the most recent public trades (tape) for an
+        /// instrument. Reuses the WS <see cref="WsTradesPayload"/> shape ({ symbol, trades:[...] }) since
+        /// the gRPC-Gateway response is byte-identical. This is the polling source the live trade tape
+        /// falls back to when the WS <c>INSTRUMENT_TRADES</c> stream is snapshot-only.
+        /// </summary>
+        public Task<WsTradesPayload> GetLatestTradesAsync(string symbol, CancellationToken ct = default)
+            => GetAsync<WsTradesPayload>($"v1/instruments/{Uri.EscapeDataString(symbol)}/trades/latest", ct);
+
         public Task<BarsResponse> GetBarsAsync(string symbol, string timeframe, DateTime startUtc, DateTime endUtc, CancellationToken ct = default)
         {
             var url = $"v1/instruments/{Uri.EscapeDataString(symbol)}/bars" +

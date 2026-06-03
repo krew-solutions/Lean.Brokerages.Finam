@@ -29,6 +29,11 @@
   "finam-ws-url": "wss://api.finam.ru/ws",
   "finam-account-type": "margin",
 
+  "//marketdata": "WS market-data is snapshot-only; poll REST for the live tape. 'auto' self-adapts (REST only when WS is stale); 'ws' disables the REST fallback.",
+  "finam-marketdata-source": "rest",
+  "finam-marketdata-poll-interval": "1000",
+  "finam-marketdata-staleness-seconds": "10",
+
   "environments": {
     "live-finam": {
       "live-mode": true,

@@ -5,6 +5,7 @@
 
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -218,6 +219,183 @@ namespace QuantConnect.Brokerages.Finam.Tests
                 }
                 cts.Cancel();
             }
+        }
+
+        /// <summary>
+        /// Diagnostic: determines whether the live WS <c>INSTRUMENT_TRADES</c> stream actually delivers a
+        /// fresh trade tape, or only a stale last-trade snapshot (resent as a heartbeat). For a MOEX spot
+        /// symbol (<c>MISX</c>) and a FORTS futures symbol (<c>RTSX</c>) it subscribes to BOTH
+        /// <c>QUOTES</c> and <c>INSTRUMENT_TRADES</c>, and per symbol tracks:
+        /// <list type="bullet">
+        ///   <item>trade frames, distinct <c>tradeId</c>s, frames carrying a <em>fresh</em> trade
+        ///         (timestamp within the last 5 min), and the newest trade timestamp seen;</item>
+        ///   <item>quote frames + freshness — proving the market is actually live right now;</item>
+        /// </list>
+        /// It also probes REST <c>LatestTrades</c>/<c>LatestQuote</c> before and after the window, so we
+        /// can directly compare what WS streams vs what REST returns. The first few raw INSTRUMENT_TRADES
+        /// frames are dumped verbatim.
+        ///
+        /// Reading the result:
+        /// <list type="bullet">
+        ///   <item><b>WS tape is live</b> for a symbol iff distinctTradeIds &gt; 1 and tradeFreshFrames &gt; 0.</item>
+        ///   <item><b>WS is snapshot-only (broken)</b> iff quotes are fresh (market live) but distinctTradeIds == 1
+        ///         and the only trade is older than the 5-min frontier — i.e. the production
+        ///         <c>OnInstrumentTrades</c> frontier would drop it and emit nothing.</item>
+        /// </list>
+        /// MUST run during MOEX trading hours. The futures contrast needs a live contract via
+        /// <c>QC_FINAM_SMOKE_FUTURES_SYMBOL</c> (e.g. RIM6@RTSX); a stale contract yields an ERROR.
+        /// </summary>
+        [Test]
+        public async Task ContrastsSpotVsFuturesInstrumentTrades()
+        {
+            using var api = CreateClient(out _);
+            var wsUrl = Config.Get(FinamConstants.ConfigWsUrl, FinamConstants.DefaultWsEndpoint);
+            var seconds = Config.GetInt("finam-smoke-seconds", 120);
+            var freshWindow = TimeSpan.FromMinutes(5);
+
+            var spot = Config.Get(FinamConstants.ConfigSmokeSpotSymbol, TestSymbol);
+            var futures = Config.Get(FinamConstants.ConfigSmokeFuturesSymbol, string.Empty);
+            var symbols = string.IsNullOrEmpty(futures) ? new[] { spot } : new[] { spot, futures };
+            if (string.IsNullOrEmpty(futures))
+            {
+                Log.Trace("Smoke.Contrast: NO futures symbol set — futures contrast skipped. " +
+                          "Set QC_FINAM_SMOKE_FUTURES_SYMBOL=<live RTSX contract> (e.g. RIM6@RTSX) to compare.");
+            }
+
+            static string Ticker(string s) => s.Split(FinamConstants.SymbolSeparator)[0];
+
+            // REST probe: shows what LatestTrades/LatestQuote return (compare WS-stream vs REST tape).
+            async Task ProbeRestAsync(string label)
+            {
+                foreach (var symbol in symbols)
+                {
+                    try
+                    {
+                        var q = await api.GetLatestQuoteAsync(symbol);
+                        var fq = q?.Quote;
+                        Log.Trace($"Smoke.Contrast REST[{label}] {symbol} quote ts={fq?.Timestamp:o} last={fq?.Last?.AsDecimal()} bid={fq?.Bid?.AsDecimal()} ask={fq?.Ask?.AsDecimal()}");
+                    }
+                    catch (Exception ex) { Log.Trace($"Smoke.Contrast REST[{label}] {symbol} quote error: {ex.Message}"); }
+                    try
+                    {
+                        var t = await api.GetLatestTradesAsync(symbol);
+                        var latest = t?.Trades?.OrderByDescending(x => x.Timestamp).FirstOrDefault();
+                        Log.Trace($"Smoke.Contrast REST[{label}] {symbol} trades count={t?.Trades?.Count} latestTradeId={latest?.TradeId} ts={latest?.Timestamp:o} price={latest?.Price?.AsDecimal()}");
+                    }
+                    catch (Exception ex) { Log.Trace($"Smoke.Contrast REST[{label}] {symbol} trades error: {ex.Message}"); }
+                }
+            }
+
+            var tradeFrames = new ConcurrentDictionary<string, int>();
+            var tradeFreshFrames = new ConcurrentDictionary<string, int>();
+            var maxTradeTs = new ConcurrentDictionary<string, DateTime>();
+            var tradeIdSeen = new ConcurrentDictionary<string, byte>();   // key "ticker|tradeId"
+            var quoteFrames = new ConcurrentDictionary<string, int>();
+            var quoteFreshFrames = new ConcurrentDictionary<string, int>();
+            var maxQuoteTs = new ConcurrentDictionary<string, DateTime>();
+            var dumped = new ConcurrentDictionary<string, int>();
+            const int dumpLimit = 5;
+
+            using var ws = new FinamWebSocketClient(wsUrl, api.GetValidJwtAsync);
+            ws.ConnectionError += msg => Log.Trace($"Smoke.Contrast: connection error: {msg}");
+            ws.EnvelopeReceived += envelope =>
+            {
+                if (envelope.IsError)
+                {
+                    Log.Trace($"Smoke.Contrast: ERROR {envelope.ErrorInfo?.Type} code={envelope.ErrorInfo?.Code} {envelope.ErrorInfo?.Message}");
+                    return;
+                }
+                if (envelope.IsEvent)
+                {
+                    Log.Trace($"Smoke.Contrast: EVENT {envelope.EventInfo?.Event} {envelope.EventInfo?.Reason}");
+                    return;
+                }
+                if (!envelope.IsData) return;
+
+                var fresh = DateTime.UtcNow - freshWindow;
+
+                if (envelope.SubscriptionType == WsSubscriptionType.InstrumentTrades)
+                {
+                    WsTradesPayload payload;
+                    try { payload = envelope.PayloadAs<WsTradesPayload>(); }
+                    catch (Exception ex) { Log.Trace($"Smoke.Contrast: trades parse error: {ex.Message}; raw={envelope.Payload}"); return; }
+                    if (payload?.Trades == null) return;
+
+                    var key = Ticker(payload.Symbol ?? envelope.SubscriptionKey ?? "?");
+                    tradeFrames.AddOrUpdate(key, 1, (_, n) => n + 1);
+
+                    var anyFresh = false;
+                    foreach (var trade in payload.Trades)
+                    {
+                        if (!string.IsNullOrEmpty(trade.TradeId)) tradeIdSeen.TryAdd($"{key}|{trade.TradeId}", 0);
+                        var ts = trade.Timestamp.ToUniversalTime();
+                        maxTradeTs.AddOrUpdate(key, ts, (_, prev) => ts > prev ? ts : prev);
+                        if (ts >= fresh) anyFresh = true;
+                    }
+                    if (anyFresh) tradeFreshFrames.AddOrUpdate(key, 1, (_, n) => n + 1);
+
+                    var shown = dumped.AddOrUpdate(key, 1, (_, n) => n + 1);
+                    if (shown <= dumpLimit)
+                    {
+                        Log.Trace($"Smoke.Contrast: {key} INSTRUMENT_TRADES raw frame #{shown}: {envelope.Payload}");
+                    }
+                }
+                else if (envelope.SubscriptionType == WsSubscriptionType.Quotes)
+                {
+                    WsQuotePayload payload;
+                    try { payload = envelope.PayloadAs<WsQuotePayload>(); }
+                    catch { return; }
+                    if (payload?.Quote == null) return;
+
+                    foreach (var quote in payload.Quote)
+                    {
+                        var key = Ticker(quote.Symbol ?? envelope.SubscriptionKey ?? "?");
+                        quoteFrames.AddOrUpdate(key, 1, (_, n) => n + 1);
+                        var ts = quote.Timestamp.ToUniversalTime();
+                        maxQuoteTs.AddOrUpdate(key, ts, (_, prev) => ts > prev ? ts : prev);
+                        if (ts >= fresh) quoteFreshFrames.AddOrUpdate(key, 1, (_, n) => n + 1);
+                    }
+                }
+            };
+
+            await ProbeRestAsync("before");
+
+            using var cts = new CancellationTokenSource();
+            ws.Start(cts.Token);
+            foreach (var symbol in symbols)
+            {
+                await ws.SubscribeQuotesAsync(symbol);
+                await ws.SubscribeInstrumentTradesAsync(symbol);
+            }
+
+            Log.Trace($"Smoke.Contrast: subscribed QUOTES+INSTRUMENT_TRADES for {string.Join(", ", symbols)}; observing {seconds}s...");
+            await Task.Delay(TimeSpan.FromSeconds(seconds));
+            cts.Cancel();
+
+            await ProbeRestAsync("after");
+
+            var totalFrames = 0;
+            foreach (var symbol in symbols)
+            {
+                var key = Ticker(symbol);
+                var tf = tradeFrames.GetValueOrDefault(key);
+                var tff = tradeFreshFrames.GetValueOrDefault(key);
+                var distinct = tradeIdSeen.Keys.Count(k => k.StartsWith(key + "|", StringComparison.OrdinalIgnoreCase));
+                var qf = quoteFrames.GetValueOrDefault(key);
+                var qff = quoteFreshFrames.GetValueOrDefault(key);
+                totalFrames += tf + qf;
+                Log.Trace($"Smoke.Contrast SUMMARY {symbol}: tradeFrames={tf} distinctTradeIds={distinct} tradeFreshFrames={tff} " +
+                          $"maxTradeTs={(maxTradeTs.TryGetValue(key, out var mt) ? mt.ToString("o") : "-")} | " +
+                          $"quoteFrames={qf} quoteFreshFrames={qff} maxQuoteTs={(maxQuoteTs.TryGetValue(key, out var mq) ? mq.ToString("o") : "-")}");
+            }
+            Log.Trace("Smoke.Contrast: WS tape LIVE iff distinctTradeIds>1 && tradeFreshFrames>0. " +
+                      "WS SNAPSHOT-ONLY (broken) iff quoteFreshFrames>0 (market live) but distinctTradeIds==1 && tradeFreshFrames==0.");
+
+            if (totalFrames == 0)
+            {
+                Assert.Ignore("No QUOTES/INSTRUMENT_TRADES DATA frames within the window — likely outside MOEX trading hours.");
+            }
+            Assert.That(totalFrames, Is.GreaterThan(0), "Expected at least one DATA frame (channel alive)");
         }
     }
 }

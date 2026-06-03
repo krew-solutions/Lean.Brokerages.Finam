@@ -48,7 +48,10 @@ namespace QuantConnect.Brokerages.Finam
             { FinamConstants.ConfigAccountId,   Config.Get(FinamConstants.ConfigAccountId) },
             { FinamConstants.ConfigApiUrl,      Config.Get(FinamConstants.ConfigApiUrl, FinamConstants.DefaultRestEndpoint) },
             { FinamConstants.ConfigWsUrl,       Config.Get(FinamConstants.ConfigWsUrl, FinamConstants.DefaultWsEndpoint) },
-            { FinamConstants.ConfigAccountType, Config.Get(FinamConstants.ConfigAccountType, "margin") }
+            { FinamConstants.ConfigAccountType, Config.Get(FinamConstants.ConfigAccountType, "margin") },
+            { FinamConstants.ConfigMarketDataSource,           Config.Get(FinamConstants.ConfigMarketDataSource, FinamConstants.MarketDataSourceAuto) },
+            { FinamConstants.ConfigMarketDataPollInterval,     Config.Get(FinamConstants.ConfigMarketDataPollInterval, FinamConstants.DefaultMarketDataPollIntervalMs.ToString()) },
+            { FinamConstants.ConfigMarketDataStalenessSeconds, Config.Get(FinamConstants.ConfigMarketDataStalenessSeconds, string.Empty) }
         };
 
         /// <inheritdoc />
@@ -73,6 +76,12 @@ namespace QuantConnect.Brokerages.Finam
                 ? AccountType.Cash
                 : AccountType.Margin;
 
+            var marketDataSource = job.BrokerageData.TryGetValue(FinamConstants.ConfigMarketDataSource, out var mds) ? mds : null;
+            var pollIntervalMs = job.BrokerageData.TryGetValue(FinamConstants.ConfigMarketDataPollInterval, out var pi)
+                && int.TryParse(pi, out var parsedPoll) ? parsedPoll : FinamConstants.DefaultMarketDataPollIntervalMs;
+            var stalenessSeconds = job.BrokerageData.TryGetValue(FinamConstants.ConfigMarketDataStalenessSeconds, out var st)
+                && int.TryParse(st, out var parsedStale) ? parsedStale : 0;
+
             if (errors.Count != 0)
             {
                 throw new System.Exception("FinamBrokerageFactory.CreateBrokerage: missing configuration: " + string.Join(", ", errors));
@@ -86,7 +95,10 @@ namespace QuantConnect.Brokerages.Finam
                 accountType,
                 algorithm,
                 algorithm?.Portfolio?.Transactions,
-                Composer.Instance.GetPart<IDataAggregator>());
+                Composer.Instance.GetPart<IDataAggregator>(),
+                marketDataSource,
+                pollIntervalMs,
+                stalenessSeconds);
 
             Composer.Instance.AddPart<IDataQueueHandler>(brokerage);
             return brokerage;

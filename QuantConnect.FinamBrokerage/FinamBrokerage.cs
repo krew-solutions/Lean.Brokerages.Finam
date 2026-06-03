@@ -62,7 +62,9 @@ namespace QuantConnect.Brokerages.Finam
         /// <see cref="FinamBrokerage"/> through <see cref="FinamBrokerageFactory"/>.
         /// </summary>
         public FinamBrokerage(string apiUrl, string wsUrl, string secret, string accountId, AccountType accountType,
-            IAlgorithm algorithm, IOrderProvider orderProvider, IDataAggregator aggregator)
+            IAlgorithm algorithm, IOrderProvider orderProvider, IDataAggregator aggregator,
+            string marketDataSource = null, int marketDataPollIntervalMs = FinamConstants.DefaultMarketDataPollIntervalMs,
+            int marketDataStalenessSeconds = 0)
             : base("Finam Brokerage")
         {
             if (string.IsNullOrEmpty(accountId)) throw new ArgumentException("Finam account id required", nameof(accountId));
@@ -74,6 +76,15 @@ namespace QuantConnect.Brokerages.Finam
             _orderProvider = orderProvider;
             _symbolMapper = new FinamSymbolMapper();
             _api = new FinamApiClient(apiUrl ?? FinamConstants.DefaultRestEndpoint, secret);
+
+            // Live market-data routing. The Finam WS feed is currently snapshot-only (see
+            // FinamBrokerage.DataQueueHandler remarks), so 'auto' falls back to REST polling when WS goes stale.
+            _marketDataSource = NormalizeMarketDataSource(marketDataSource);
+            _marketDataPollInterval = TimeSpan.FromMilliseconds(
+                marketDataPollIntervalMs > 0 ? marketDataPollIntervalMs : FinamConstants.DefaultMarketDataPollIntervalMs);
+            _marketDataStaleness = marketDataStalenessSeconds > 0
+                ? TimeSpan.FromSeconds(marketDataStalenessSeconds)
+                : FinamConstants.WebSocketStaleness;
 
             // Finam MOEX accounts settle in RUB; without this the engine defaults to USD and fails to
             // find a RUB conversion rate. TODO: detect per-account for US-market Finam accounts.

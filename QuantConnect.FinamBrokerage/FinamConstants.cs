@@ -105,14 +105,49 @@ namespace QuantConnect.Brokerages.Finam
 
         /// <summary>
         /// How long live WebSocket data for a symbol is considered fresh before the
-        /// REST <c>LastQuote</c> fallback poll takes over for that symbol.
+        /// REST fallback poll takes over for that symbol. Default for
+        /// <see cref="ConfigMarketDataStalenessSeconds"/>.
         /// </summary>
         public static readonly System.TimeSpan WebSocketStaleness = System.TimeSpan.FromSeconds(10);
+
+        /// <summary>
+        /// Live market-data source selector (<c>config.json</c> key <c>finam-marketdata-source</c>):
+        /// <list type="bullet">
+        ///   <item><c>auto</c> (default) — WS primary, automatically falling back to REST polling per
+        ///         symbol when the WS feed delivers no <em>fresh</em> data for
+        ///         <see cref="ConfigMarketDataStalenessSeconds"/> seconds;</item>
+        ///   <item><c>rest</c> — always poll REST (the WS market-data feed is known snapshot-only);</item>
+        ///   <item><c>ws</c> — WS only, no REST fallback (legacy).</item>
+        /// </list>
+        /// </summary>
+        public const string ConfigMarketDataSource = "finam-marketdata-source";
+        public const string MarketDataSourceAuto = "auto";
+        public const string MarketDataSourceRest = "rest";
+        public const string MarketDataSourceWs = "ws";
+
+        /// <summary>REST market-data poll cadence in milliseconds (<c>finam-marketdata-poll-interval</c>).</summary>
+        public const string ConfigMarketDataPollInterval = "finam-marketdata-poll-interval";
+        public const int DefaultMarketDataPollIntervalMs = 1000;
+
+        /// <summary>
+        /// In <c>auto</c> mode, how many seconds without fresh WS data before a symbol falls back to REST
+        /// polling (<c>finam-marketdata-staleness-seconds</c>; defaults to <see cref="WebSocketStaleness"/>).
+        /// </summary>
+        public const string ConfigMarketDataStalenessSeconds = "finam-marketdata-staleness-seconds";
 
         /// <summary>
         /// Configuration key used by <c>config.json</c> for the account category (cash/margin).
         /// </summary>
         public const string ConfigAccountType = "finam-account-type";
+
+        /// <summary>
+        /// Config keys for the <c>ContrastsSpotVsFuturesInstrumentTrades</c> diagnostic smoke test:
+        /// the spot (MOEX/<c>MISX</c>) and futures (FORTS/<c>RTSX</c>) symbols whose live
+        /// <c>INSTRUMENT_TRADES</c> streams are compared. Override the futures default with a live
+        /// near-month contract via <c>QC_FINAM_SMOKE_FUTURES_SYMBOL</c>.
+        /// </summary>
+        public const string ConfigSmokeSpotSymbol = "finam-smoke-spot-symbol";
+        public const string ConfigSmokeFuturesSymbol = "finam-smoke-futures-symbol";
 
         /// <summary>
         /// Symbol separator used by Finam: <c>TICKER@MIC</c> (e.g. <c>SBER@MISX</c>).
